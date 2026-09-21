@@ -10,7 +10,9 @@
 
 依赖见 `requirements.txt`（`cryptography`、`httpx` 两个非标准库）。安装：`pip install -r requirements.txt`。
 
-### 2. 配置（环境变量，可选）
+### 2. 配置（.env 文件，可选）
+
+复制 `.env.example` 为技能根目录下的 `.env`，按需修改。**`.env` 是唯一外部配置来源，shell 环境变量不再被读取**——宿主环境的残留变量不会产生干扰。
 
 | 变量 | 默认 | 说明 |
 |------|------|------|

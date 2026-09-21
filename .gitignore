@@ -1,4 +1,7 @@
 # 本地凭证与 OAuth 中间产物(严禁提交)
+.env
+.env.local
+.env.server
 .token_key
 .token_cache.enc
 .swagger_meta.enc
