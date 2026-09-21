@@ -1,0 +1,13 @@
+# 本地凭证与 OAuth 中间产物(严禁提交)
+.token_key
+.token_cache.enc
+.swagger_meta.enc
+.oauth_next_step.json
+.oauth_next_step.json.bak
+.callback_result.json
+
+# 临时调试/冒烟脚本
+_*.py
+_*.json
+_*.ps1
+__pycache__/
