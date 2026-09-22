@@ -2,6 +2,8 @@
 .env
 .env.local
 .env.server
+.env.server1
+.env.server2
 .token_key
 .token_cache.enc
 .swagger_meta.enc
@@ -13,4 +15,5 @@
 _*.py
 _*.json
 _*.ps1
+_*.txt
 __pycache__/

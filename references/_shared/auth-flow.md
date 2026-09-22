@@ -4,54 +4,54 @@
 
 ## 1. 授权态检查
 
-```python
-from scripts import auth, token_store
-
-tokens = token_store.load()
-if not tokens or not token_store.is_access_token_valid(tokens):
-    auth.ensure_authorized()
+```bash
+python cli.py auth status
 ```
 
-- `token_store.load()` 读 Fernet 加密缓存（`.token_cache.enc`，密钥 `.token_key`，权限 600）
-- 缓存有效 → 直接进入分支工作流
-- 缓存缺失/过期 → `ensure_authorized()` 抛 `RuntimeError`（含 `authorize_url` 与 `state`），并把中间产物写到 `.oauth_next_step.json`
+- 返回 `authorized: true` → 直接进入分支工作流
+- 返回 `authorized: false` → 走第 2 节三方流程
+- status 内部会先用 refresh_token 静默续期再判断,避免把"30 分钟 access_token
+  过期"误判为需要重授权
 
 ## 2. 三方授权流程（agent 逐步执行）
 
-`ensure_authorized()` **不会自动完成授权**。它抛错后，agent 必须：
+CLI 把原多步 python 流程收敛为两条命令。`auth start` **不会自动完成授权**:
 
-1. **读取 `.oauth_next_step.json`**，取 `authorize_url` 与 `state`
+1. **运行 `python cli.py auth start`**,拿到 `authorize_url` 与 `state`
 2. **用 `ask_user` 工具把 `authorize_url` 展示给用户**——不要用 print 让用户手动复制
 3. 用户在浏览器完成三方流程：
    `MCP server /authorize` → IWP SPA `/oauth-authorize?tx_id=...` →（已登录一键确认；未登录页内登录）→ 确认授权 → 302 回 `http://localhost:9999/callback?code=...&state=...`
-   本地 callback server（`auth.run_local_callback_server`）接收 code 并落盘 `.callback_result.json`
-4. **agent 调 `auth.poll_callback_result(timeout_s=300)`** 等待并读取 code（同进程阻塞轮询；不要在别的进程里等）
-5. **agent 调 `auth.finalize_authorization(code=..., verifier=...)`** 用 code + PKCE verifier 换 token 并写入加密缓存
+   本地 callback server 自动接收 code
+4. **运行 `python cli.py auth finish`**——内部完成:轮询回调(默认 300s)→
+   校验 state → code + PKCE verifier 换 token → 写加密缓存 → 清理中间产物
+   （`.oauth_next_step.json` / `.callback_result.json`）
 
-`finalize_authorization` 成功后会自动清理授权中间产物（`.oauth_next_step.json` / `.callback_result.json` / `.bak`）。
+浏览器最后一跳死亡但授权事务已确认的恢复路径:从 `/oauth/callback` 的 302
+里拿到 code 后,用 `python cli.py auth finish --code <code>` 手动注入,无需重走。
 
 ## 3. 时序与异常
 
 | 环节 | 约束 |
 |------|------|
-| 总超时 | 5 分钟内必须完成；`poll_callback_result()` 超时抛 `RuntimeError`，提示用户重试 |
-| 本地回调端口 | `127.0.0.1:9999` 被占用时 `ensure_authorized()` 显式报错并给出占用进程信息；让用户处理占用后重试，**不要换端口硬试** |
-| state 校验 | callback 的 `state` 必须与 `.oauth_next_step.json` 中一致；不一致按 CSRF 处理，终止流程 |
-| 用户拒绝授权 | callback 收到 error → 报告用户，不重试不猜测 |
+| 总超时 | 5 分钟内必须完成；`auth finish` 轮询超时返回 `callback_timeout` 错误，提示用户重试 |
+| 本地回调端口 | `127.0.0.1:9999` 被占用时 `auth start` 显式报错并给出占用进程信息；让用户处理占用后重试，**不要换端口硬试** |
+| state 校验 | `auth finish` 内部校验回调 `state` 与授权事务一致；不一致返回 `state_mismatch`，按 CSRF 处理，终止流程 |
+| 用户拒绝授权 | `auth finish` 返回 `auth_denied` → 报告用户，不重试不猜测 |
 
 ## 4. token 失效与自动续期
 
-- 调工具返回 401 → `scripts/client.py` 自动用 refresh_token 续期并重试 1 次
-- refresh 也失败（`McpAuthExpiredError` / `iwp_credential_expired`）→ **必须**引导用户重新授权：
-  1. `token_store.invalidate()`
-  2. `auth.ensure_authorized()` 重新走第 2 节流程
+- 调工具返回 401 → CLI/client 自动用 refresh_token 续期并重试 1 次
+- refresh 也失败（错误 kind 为 `auth_expired`）→ **必须**引导用户重新授权：
+  1. `python cli.py auth invalidate`
+  2. `python cli.py auth start` 重新走第 2 节流程
 - 不要"猜 token"、"绕过授权"或默默重试——绝对禁止
 
 ## 5. 撤销授权（用户要求下线时）
 
-```python
-from scripts.client import revoke_current_token
-revoke_current_token()  # 调 MCP /revoke + 清本地缓存
+```bash
+python cli.py auth invalidate   # 仅清本地缓存凭证
 ```
+
+如需同时撤销服务端凭证（MCP /revoke），调用 `scripts.client.revoke_current_token()`。
 
 注意：IWP 的"退出登录"（Web 会话）不影响 MCP 会话；MCP 凭证只能通过本入口或"下线所有设备"清除。

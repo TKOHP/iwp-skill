@@ -19,7 +19,11 @@
 
 ## 3. 工作流 W1：工具发现
 
-按 `../_shared/tool-discovery.md` §2 的发现入口取全量清单与单个工具的 schema（本文不重复代码）。
+```bash
+python cli.py tools --out _tools.json    # 加 --refresh 强制刷新 schema 缓存
+```
+
+用读文件工具在 `_tools.json` 中定位工具的 name/description/inputSchema。
 
 渲染约定：分组列表（课题任务 / 周报）+ 一句话描述；schema 展示必填项与类型，不贴原始 JSON。
 
@@ -30,7 +34,8 @@
    - 用户给了工具名 → 先经 W1 查其 inputSchema,按 schema 组装参数
    - 用户只描述意图 → 经 W1 浏览 description 匹配工具,列出候选让用户确认
 2. 确认（见 §5）后:
-   call_tool("<工具名>", {参数})
+   简单 ASCII 参数 → python cli.py call <工具名> --args '<JSON>'
+   含中文/复杂结构 → 参数写 JSON 文件后 python cli.py call <工具名> --args-file _args.json
 3. 回执: 按 `../_shared/output-format.md` 渲染
 ```
 
@@ -48,9 +53,9 @@
 
 ## 6. 调用约定
 
-调用走 `scripts.client.call_tool`，发现与 **schema 优先**原则见 `../_shared/tool-discovery.md`。
+调用走 `python cli.py call`（万能透传），发现与 **schema 优先**原则见 `../_shared/tool-discovery.md`。
 
-新工具频繁使用、场景稳定后 → 候选迁入对应场景分支的参考文件——只能带场景工作流与示例参数，参数全量仍以 `tools/list` 为准（改文档，不改脚本）。
+新工具频繁使用、场景稳定后 → 候选迁入对应场景分支的参考文件——只能带场景工作流与示例参数，参数全量仍以 `cli.py tools` 输出为准（改文档，不改脚本）。
 
 ## 7. 错误处理
 

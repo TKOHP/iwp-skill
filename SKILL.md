@@ -25,20 +25,24 @@ iwp skill 是 IWP（创新工作平台）MCP server 的标准 OAuth 2.1 PKCE 客
 
 ## 授权铁律（每次调工具前）
 
-任何分支、任何工具调用之前，必须先确认授权态有效（access_token 存在且未过期）。无效或缺失时，按 `references/_shared/auth-flow.md` 执行三方 OAuth 流程（**授权前必读**：授权流程、端口占用、超时与 state 校验的唯一事实来源，本文不重复其步骤）。
+任何分支、任何工具调用之前，必须先确认授权态有效（`python cli.py auth status`，返回 `authorized: true` 即有效）。无效或缺失时，按 `references/_shared/auth-flow.md` 执行三方 OAuth 流程（**授权前必读**：授权流程、端口占用、超时与 state 校验的唯一事实来源，本文不重复其步骤）。
 
 ## 调用约定
 
-所有工具调用走统一入口 `scripts.client.call_tool("<工具名>", {参数})`，返回 IWP 业务格式 `{code, message, data}`。client 内置完整 MCP 协议栈（版本协商兼容 2025-03-26~2026-07-28 两代），无需宿主 MCP 配置。
+所有工具调用走统一 CLI 入口：技能根目录 `cli.py`（内部路径基于 SKILL_DIR 解析，cwd 无关；文档示例约定 `cd` 到技能目录后执行）。
 
-- **schema 优先**：调用示例仅示意，参数以 MCP `tools/list` 的 inputSchema 为准 → `references/_shared/tool-discovery.md`
+- **透传**：`python cli.py call <工具名> --args '<JSON 对象>'`；参数含中文或复杂结构时改用 `--args-file <file.json>`（bash 内联 JSON 会被转码，禁止内联中文参数）
+- **高频场景**：`python cli.py tasks list --mine --all`（自动翻页 + 状态标签）；`python cli.py auth status|start|finish|invalidate`
+- **schema 优先**：调用示例仅示意，参数以 `python cli.py tools` 输出的 inputSchema 为准（工具事实来源仍是 MCP `tools/list`）→ `references/_shared/tool-discovery.md`
+- **输出契约**：stdout 永远是 ASCII-safe JSON（任何管道编码下无损不乱码）；需要中文可读的大段结果加 `--out file.json`（UTF-8 文件，用读文件工具查看）。成功 `{"ok":true,...}` 退出码 0；失败 `{"ok":false,"error":{kind,message,hint}}` 退出码 1；用法错误退出码 2
 - 错误翻译 → `references/_shared/failure-modes.md`；输出渲染 → `references/_shared/output-format.md`
-- 连接/协商诊断：`python -m scripts.protocol_selfcheck`
+- 连接/协商诊断：`python cli.py selfcheck`
 - **写操作先确认**：create / update / delete / assign 前向用户复述将要写入的内容；delete 与批量提交属高危，必须显式确认
 
 ## 相关文档
 
 - `references/tasks/README.md` / `references/reports/README.md` / `references/free-mode/README.md` - 三分支场景提示词
 - `references/_shared/` - 授权工作流 / 工具发现（schema 优先）/ 错误码翻译 / 输出格式
-- `skill_config.py` + `scripts/`（auth / client / token_store / swagger_meta）- 纯基础设施
+- `cli.py` - 统一 CLI 入口（透传 call / tools / auth / tasks list / selfcheck；输出契约见 SKILL.md 调用约定）
+- `skill_config.py` + `scripts/`（auth / client / token_store / swagger_meta）- 纯基础设施（cli.py 的内部依赖,agent 不直接调用）
 - `docs/architecture.md` / `docs/oauth-flow.md` - 架构决策记录 / OAuth 三方交互详解

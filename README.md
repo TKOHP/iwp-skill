@@ -24,16 +24,13 @@
 
 ### 3. 第一次使用
 
-```python
-from scripts import auth
-
+```bash
 # 任何 MCP 工具调用前必须先授权
-try:
-    auth.ensure_authorized()
-except RuntimeError as exc:
-    # 错误信息中给出 .oauth_next_step.json 路径
-    print(exc)
-    # 流程:agent 用 ask_user 展示 URL → 用户点 → poll → finalize
+python cli.py auth status
+# 未授权 → 走三方流程:auth start 输出授权链接
+python cli.py auth start
+# agent 用 ask_user 展示 authorize_url → 用户浏览器确认 →
+python cli.py auth finish
 ```
 
 完整授权工作流见 `references/_shared/auth-flow.md`。

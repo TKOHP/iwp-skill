@@ -25,11 +25,16 @@
 
 ### W1 查询任务
 
-```text
-1. "我的任务" → call_tool("list_my_tasks", {status?, page, page_size})
-2. "课题 X 的任务" → 先经 W4 拿到 subject_id → call_tool("list_tasks", {subject_id, status?, page, page_size})
-3. 单个任务详情 → call_tool("get_task_detail", {task_id})
-4. 任务日志 → call_tool("get_task_logs", {task_id, page, page_size})
+```bash
+# 我的任务(推荐 --all 自动翻页;结果含 status_label 渲染)
+python cli.py tasks list --mine --all --out _my_tasks.json
+
+# 课题 X 的任务:先经 W4 拿到 subject_id
+python cli.py tasks list --subject 26 --all --out _subject_tasks.json
+
+# 单个任务详情 / 任务日志(透传)
+python cli.py call get_task_detail --args '{"task_id": 132}'
+python cli.py call get_task_logs --args '{"task_id": 132, "page": 1, "page_size": 20}'
 ```
 
 用户没说状态时不臆造过滤条件；列表为空时如实说明。
@@ -39,31 +44,51 @@
 ```text
 1. 解析要素：课题（名称→ID）、标题、紧急度、起止日期、执行者
 2. 缺课题 → W4 课题发现；缺日期/紧急度用合理默认或询问用户
-3. 向用户复述要素（见 §5），确认后：
-   call_tool("create_task", {subject_id, title, description?, urgency?, planned_start_date?, planned_end_date?, assignee_ids?, parent_task_id?})
+3. 向用户复述要素（见 §5），确认后把参数写入 JSON 文件（含中文必须走文件）:
+   python cli.py call create_task --args-file _args.json
+   # _args.json: {"subject_id": 26, "title": "...", "description": "...",
+   #              "urgency": "normal", "planned_start_date": "YYYY-MM-DD",
+   #              "planned_end_date": "YYYY-MM-DD", "assignee_ids": [39]}
+   # 参数以 cli.py tools 中 create_task 的 inputSchema 为准
 4. 回执：新建任务 ID + 关键字段
 ```
 
 ### W3 更新 / 删除 / 分配 / 写日志
 
-```text
-- 更新:   call_tool("update_task", {task_id, ...要改的字段})    ← 先 get_task_detail 展示现状
-- 删除:   call_tool("delete_task", {task_id})                   ← 高危，见 §5
-- 分配:   call_tool("assign_task", {task_id, assignee_ids})     ← 覆盖式！先展示现执行者
-- 写日志: call_tool("add_task_log", {task_id, content})
+```bash
+# 更新:  先 get_task_detail 展示现状 → 说明将改成什么 → 确认后调
+python cli.py call update_task --args-file _args.json
+# _args.json: {"task_id": 132, "status": 2}   (其余可选字段以 inputSchema 为准)
+
+# 删除:  高危，见 §5
+python cli.py call delete_task --args '{"task_id": 132}'
+
+# 分配:  覆盖式！先展示现执行者
+python cli.py call assign_task --args-file _args.json
+# _args.json: {"task_id": 132, "assignee_ids": [39]}
+
+# 写日志
+python cli.py call add_task_log --args-file _args.json
+# _args.json: {"task_id": 132, "content": "..."}
 ```
 
 ### W4 课题发现（拿 subject_id）
 
+```bash
+# 模糊搜索课题名称
+python cli.py call list_subjects --args '{"subject_title": "科创", "page": 1, "page_size": 20}'
+# 或全量拉取后本地筛选
+python cli.py call list_subjects --args '{"page": 1, "page_size": 100}' --out _subjects.json
+```
+
 ```text
-1. call_tool("list_subjects", {subject_title?, status?, page, page_size})
-2. 多个候选时用 ask_user 让用户选择；不要猜测"相近名称"
-3. status 语义: 1-进行中, 2-已完成, 3-暂停, 0-储备中（以 inputSchema/工具描述为准）
+1. 多个候选时用 ask_user 让用户选择；不要猜测"相近名称"
+2. status 语义: 1-进行中, 2-已完成, 3-暂停, 0-储备中（以 inputSchema/工具描述为准）
 ```
 
 ## 4. 调用约定
 
-调用走 `../_shared/tool-discovery.md` 的约定：统一入口 `scripts.client.call_tool`，**schema 优先**。
+调用走 `../_shared/tool-discovery.md` 的约定：统一入口 `python cli.py`，**schema 优先**。
 
 ## 5. 写操作确认规则
 

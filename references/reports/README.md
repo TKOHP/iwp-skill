@@ -22,16 +22,18 @@
 
 ```text
 1. 拿创建三元组:
-   call_tool("get_current_work_week", {})
-   → data.work_week.id = work_week_id
-   → data.identity = {user_id, real_name, org_id, org_name}
-   （指定历史周: call_tool("get_current_work_week", {work_week_id: N})）
+   python cli.py call get_current_work_week --args '{}' --out _week.json
+   → result.work_week.id = work_week_id
+   → result.identity = {user_id, real_name, org_id, org_name}
+   （指定历史周: --args '{"work_week_id": N}'）
 2. 起草周报内容: work_name / work_content / work_result
    （用户给了素材就整理；没给就先问，不要编造工作内容）
-3. 确认（见 §5）后创建:
-   单条 → call_tool("create_weekly_report", {work_week_id, user_id, org_id,
-              work_name, work_content, work_result, subject_id?, is_submitted})
-   多条 → call_tool("batch_create_weekly_reports", {work_week_id, user_id, org_id, reports:[...]})
+3. 确认（见 §5）后创建（含中文参数必须走 --args-file，以 inputSchema 为准）:
+   单条 → python cli.py call create_weekly_report --args-file _args.json
+          # {"work_week_id": N, "user_id": N, "org_id": N, "work_name": "...",
+          #  "work_content": "...", "work_result": "...", "is_submitted": 0}
+   多条 → python cli.py call batch_create_weekly_reports --args-file _args.json
+          # {"work_week_id": N, "user_id": N, "org_id": N, "reports": [...]}
 4. 回执: 周报 ID + 提交状态
 ```
 
@@ -42,10 +44,10 @@
 ```text
 1. 拿三元组: 同 W1 第 1 步（work_week_id + identity）
 2. 收集任务素材:
-   a. call_tool("list_my_tasks", {page, page_size})
+   a. python cli.py tasks list --mine --all --out _my_tasks.json
       → 按工作周起止日期过滤（start_date ~ end_date 与任务计划/更新日期比对）
-   b. 关键任务补细节: call_tool("get_task_logs", {task_id})
-   c. 需要按课题组织时: call_tool("list_subjects", {}) 定位课题
+   b. 关键任务补细节: python cli.py call get_task_logs --args '{"task_id": N}'
+   c. 需要按课题组织时: python cli.py call list_subjects --args '{}' 定位课题
       （任务查询工具的完整用法见 ../tasks/README.md W1/W4）
 3. 按课题聚合起草:
    每课题一条 → work_name=课题或事项名, work_content=做了什么, work_result=产出/进度
@@ -68,18 +70,22 @@
 
 ## 6. 查询子工作流 W3
 
-```text
-- 我的周报:   call_tool("list_weekly_reports", {user_id: identity.user_id, is_submitted?, page, page_size})
-- 按维度查:   call_tool("list_weekly_reports", {work_week_id? / user_id? / org_id? / subject_id? / is_submitted?})
-- 周报详情:   call_tool("get_weekly_report_detail", {report_id})
-- 更新:       call_tool("update_weekly_report", {id, ...要改的字段})
+```bash
+# 我的周报 / 按维度查(参数以 inputSchema 为准)
+python cli.py call list_weekly_reports --args-file _args.json --out _reports.json
+# _args.json 示例: {"user_id": 39} 或 {"work_week_id": N} / {"subject_id": N} / {"is_submitted": 1}
+
+# 周报详情 / 更新
+python cli.py call get_weekly_report_detail --args '{"report_id": N}'
+python cli.py call update_weekly_report --args-file _args.json
+# _args.json: {"id": N, ...要改的字段}
 ```
 
 `user_id`/`org_id` 从 `get_current_work_week` 的 identity 取；查他人周报需要用户提供其 ID。
 
 ## 7. 调用约定
 
-调用走 `../_shared/tool-discovery.md` 的约定：统一入口 `scripts.client.call_tool`，**schema 优先**。
+调用走 `../_shared/tool-discovery.md` 的约定：统一入口 `python cli.py`，**schema 优先**。
 
 ## 8. 输出渲染
 

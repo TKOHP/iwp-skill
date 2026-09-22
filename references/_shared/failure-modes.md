@@ -2,17 +2,21 @@
 
 > 本文档定义 MCP 错误码到 iwp skill 用户可见提示的翻译规则。
 > 适用于 tasks / reports / free-mode 三个分支。
+> CLI 统一错误出口：失败时 stdout 为 `{"ok": false, "error": {"kind", "message", "hint"}}`，
+> 退出码 1（用法错误 2）。`kind` 与 `hint` 已由 cli.py 按下表预翻译，agent 直接采纳；
+> 下表用于理解语义与决定后续动作。
 
 ## 错误源分类
 
 ### 1. OAuth 协议层（本地）
 
-| 场景 | 表现 | 处理 |
-|------|------|------|
-| 无 token 缓存 | `auth.ensure_authorized()` 抛 RuntimeError | agent 用 ask_user 展示 authorize_url |
-| 本地 9999 端口被占用 | `ensure_authorized()` 报错含 `占用进程` 提示 | 用户检查并杀掉占用进程后重试 |
-| 用户 5min 内未完成授权 | `poll_callback_result()` 超时 | agent 显示"超时"，提示重试 |
-| state 不匹配 | callback 返回 `state_mismatch` | 显示"安全校验失败，可能是 CSRF 攻击" |
+| 场景 | CLI 表现 | 处理 |
+|------|----------|------|
+| 无 token 缓存 | `auth start` 返回 `need_user_authorization` + authorize_url | agent 用 ask_user 展示 authorize_url |
+| 本地 9999 端口被占用 | `auth start` 报错含 `占用进程` 提示 | 用户检查并杀掉占用进程后重试 |
+| 用户 5min 内未完成授权 | `auth finish` 返回 `callback_timeout` | agent 显示"超时"，提示重试 |
+| state 不匹配 | `auth finish` 返回 `state_mismatch` | 显示"安全校验失败，可能是 CSRF 攻击" |
+| 用户拒绝授权 | `auth finish` 返回 `auth_denied` | 报告用户，不重试不猜测 |
 | 时间戳偏差 > 60s | iwp_confirm 返回 401 | IWP 端时钟问题；联系管理员 |
 
 ### 2. MCP server 端（OAS / 协议层）
@@ -40,7 +44,8 @@
 | `upstream_error` | 上游 Flask 5xx | "上游 IWP 服务异常，请稍后重试" |
 | `upstream_timeout` | 上游 Flask 超时 | "上游 IWP 服务响应超时，请稍后重试" |
 | `version_mismatch` | server 协议版本与 client 支持集无交集 | "MCP 协议版本不兼容（server: X，client 支持 2025-03-26+），请升级 server 或 skill" |
-| `protocol` | 响应结构/会话异常（缺 session 头、非 JSON、input_required 等） | "MCP 协议交互异常，运行 python -m scripts.protocol_selfcheck 诊断" |
+| `protocol` | 响应结构/会话异常（缺 session 头、非 JSON、input_required 等） | "MCP 协议交互异常，运行 python cli.py selfcheck 诊断" |
+| `server_host_rejected`（CLI 预分类） | 421 Invalid Host header | "服务端 Host 白名单拒绝；检查 MCP server .env 的 MCP_ALLOWED_HOSTS（需含端口或 host:* 通配），改后重启 server" |
 
 ### 5. MCP server 端（限流）
 
@@ -73,14 +78,14 @@ iwp skill 的 401 处理流程：
 2. 调 `auth.auto_refresh_if_needed(force=True)`
 3. 若 refresh 成功：用新 token 重试 1 次
 4. 若 refresh 失败：`token_store.invalidate()` + 抛 `McpAuthExpiredError`
-5. agent 捕获 `McpAuthExpiredError` → 调 `auth.ensure_authorized()` 重新走 OAuth
+5. CLI 将其预分类为 `auth_expired` → agent 运行 `python cli.py auth invalidate && python cli.py auth start` 重新走 OAuth
 
 ## 何时停止重试 + 引导用户
 
-任何 `McpAuthExpiredError` / `RuntimeError("凭证...")` → 必须：
+任何 `auth_expired` 类错误（refresh_token 已失效）→ 必须：
 
 1. 不要默默重试
-2. 调用 `auth.ensure_authorized()` 让用户重新授权
-3. 用 ask_user 展示 URL
+2. 运行 `python cli.py auth invalidate && python cli.py auth start`
+3. 用 ask_user 展示 `auth start` 输出的 URL
 
 不要尝试"猜 token"或"绕过授权"——绝对禁止。
