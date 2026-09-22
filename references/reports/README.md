@@ -28,7 +28,7 @@
    （指定历史周: --args '{"work_week_id": N}'）
 2. 起草周报内容: work_name / work_content / work_result
    （用户给了素材就整理；没给就先问，不要编造工作内容）
-3. 确认（见 §5）后创建（含中文参数必须走 --args-file，以 inputSchema 为准）:
+3. 生成完整预览（见 §5），确认后创建（含中文参数必须走 --args-file，以 inputSchema 为准）:
    单条 → python cli.py call create_weekly_report --args-file _args.json
           # {"work_week_id": N, "user_id": N, "org_id": N, "work_name": "...",
           #  "work_content": "...", "work_result": "...", "is_submitted": 0}
@@ -51,22 +51,19 @@
       （任务查询工具的完整用法见 ../tasks/README.md W1/W4）
 3. 按课题聚合起草:
    每课题一条 → work_name=课题或事项名, work_content=做了什么, work_result=产出/进度
-4. **草稿表格先给用户确认**（任务 → 周报的映射是 LLM 生成的，必须让用户过目，
-   防止把未完成事项写成成果）
+4. **逐条完整预览给用户确认**（模板 C 全字段区块，任务 → 周报的映射是 LLM 生成的，
+   必须让用户过目，防止把未完成事项写成成果；见 ../_shared/write-preview.md）
 5. 确认后: 单条 → create_weekly_report；多条 → batch_create_weekly_reports
    （每条可带各自 subject_id；默认 is_submitted=0）
 ```
 
 边界：本周无任务 → 如实说明，回退 W1 询问用户素材；任务与周时间段不匹配 → 列出可疑项让用户取舍，不要静默丢弃。
 
-## 5. 写操作确认规则
+## 5. 写操作完整预览
 
-| 操作 | 确认要求 |
-|------|---------|
-| create_weekly_report | 复述 work_name / 内容摘要 / 提交状态，确认后调 |
-| batch_create | **高危**：逐行表格预览（每条 work_name + 摘要 + subject），确认后调；**单条失败不阻塞其余**，事后逐条报告 |
-| 提交（is_submitted=1） | 只在用户明确说"提交"时；否则一律存草稿 |
-| delete_weekly_report | **高危且不可恢复**（物理删除）：先 detail 确认目标，二次确认 |
+任何写操作执行前按 `../_shared/write-preview.md` 生成全字段完整预览（模板 U：变更类「现状→执行后」对照；模板 C：创建类全字段含默认值）并经用户确认，执行后回读核验。规则、模板与各工具要点以该文件为唯一事实来源，此处不重复。
+
+batch_create：逐条完整预览（每条一个区块）→ 确认后调 → **单条失败不阻塞其余**，事后逐条报告。
 
 ## 6. 查询子工作流 W3
 
@@ -89,7 +86,7 @@ python cli.py call update_weekly_report --args-file _args.json
 
 ## 8. 输出渲染
 
-按 `../_shared/output-format.md`。周报列表用表格（ID/周/事项/提交状态）；W2 的草稿确认必须用表格逐条展示；创建回执给 ID + is_submitted 状态。
+按 `../_shared/output-format.md`。周报列表用表格（ID/周/事项/提交状态）；W2 的逐条完整预览用表格区块展示；创建回执给 ID + is_submitted 状态。
 
 ## 9. 错误处理
 

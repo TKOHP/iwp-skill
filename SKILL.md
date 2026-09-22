@@ -37,7 +37,7 @@ iwp skill 是 IWP（创新工作平台）MCP server 的标准 OAuth 2.1 PKCE 客
 - **输出契约**：stdout 永远是 ASCII-safe JSON（任何管道编码下无损不乱码）；需要中文可读的大段结果加 `--out file.json`（UTF-8 文件，用读文件工具查看）。成功 `{"ok":true,...}` 退出码 0；失败 `{"ok":false,"error":{kind,message,hint}}` 退出码 1；用法错误退出码 2
 - 错误翻译 → `references/_shared/failure-modes.md`；输出渲染 → `references/_shared/output-format.md`
 - 连接/协商诊断：`python cli.py selfcheck`
-- **写操作先确认**：create / update / delete / assign 前向用户复述将要写入的内容；delete 与批量提交属高危，必须显式确认
+- **写操作完整预览**：任何写操作（create / update / delete / assign / 写日志 / 周报创建与提交，含 free-mode 透传的写工具）执行前，按 `references/_shared/write-preview.md` 生成全字段完整预览并经用户确认，执行后回读核验
 
 ## 相关文档
 

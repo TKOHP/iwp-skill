@@ -39,17 +39,16 @@ python cli.py tools --out _tools.json    # 加 --refresh 强制刷新 schema 缓
 3. 回执: 按 `../_shared/output-format.md` 渲染
 ```
 
-## 5. 写操作确认规则
+## 5. 写操作完整预览
 
-透传**不豁免**确认规则——按工具语义判断：
+透传不豁免预览——按工具语义判断（看 description / read_only 线索）：
 
-| 工具性质（看 description / read_only 线索） | 确认要求 |
+| 工具性质 | 要求 |
 |------|---------|
 | 只读（list / get / statistics 类） | 可直接调用 |
-| 写操作（create / update / assign） | 复述参数，用户确认后调 |
-| 高危（delete 类、批量） | 先查询目标确认存在 → 明确告知后果 → 二次确认 |
+| 写性质（create / update / assign / delete / 批量） | 按 `../_shared/write-preview.md` 生成全字段完整预览并经用户确认后调，执行后回读核验 |
 
-工具语义不明时，宁可先问用户，不要盲调。
+工具语义不明时，宁可先问用户确认读写性质，再决定是否走完整预览。
 
 ## 6. 调用约定
 

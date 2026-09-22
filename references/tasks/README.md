@@ -44,7 +44,7 @@ python cli.py call get_task_logs --args '{"task_id": 132, "page": 1, "page_size"
 ```text
 1. 解析要素：课题（名称→ID）、标题、紧急度、起止日期、执行者
 2. 缺课题 → W4 课题发现；缺日期/紧急度用合理默认或询问用户
-3. 向用户复述要素（见 §5），确认后把参数写入 JSON 文件（含中文必须走文件）:
+3. 生成完整预览（见 §5），确认后把参数写入 JSON 文件（含中文必须走文件）:
    python cli.py call create_task --args-file _args.json
    # _args.json: {"subject_id": 26, "title": "...", "description": "...",
    #              "urgency": "normal", "planned_start_date": "YYYY-MM-DD",
@@ -56,14 +56,14 @@ python cli.py call get_task_logs --args '{"task_id": 132, "page": 1, "page_size"
 ### W3 更新 / 删除 / 分配 / 写日志
 
 ```bash
-# 更新:  先 get_task_detail 展示现状 → 说明将改成什么 → 确认后调
+# 更新:  生成完整预览（见 §5）→ 确认后调 → 回读核验
 python cli.py call update_task --args-file _args.json
-# _args.json: {"task_id": 132, "status": 2}   (其余可选字段以 inputSchema 为准)
+# _args.json: {"task_id": 132, "status": "completed"}   (其余可选字段以 inputSchema 为准)
 
 # 删除:  高危，见 §5
 python cli.py call delete_task --args '{"task_id": 132}'
 
-# 分配:  覆盖式！先展示现执行者
+# 分配:  覆盖式！完整预览中被移除的执行者显式标注（见 §5）
 python cli.py call assign_task --args-file _args.json
 # _args.json: {"task_id": 132, "assignee_ids": [39]}
 
@@ -90,16 +90,11 @@ python cli.py call list_subjects --args '{"page": 1, "page_size": 100}' --out _s
 
 调用走 `../_shared/tool-discovery.md` 的约定：统一入口 `python cli.py`，**schema 优先**。
 
-## 5. 写操作确认规则
+## 5. 写操作完整预览
 
-| 操作 | 确认要求 |
-|------|---------|
-| create_task | 复述：课题 / 标题 / 紧急度 / 日期 / 执行者，用户确认后再调 |
-| update_task | 先 detail 展示现状 → 说明将改成什么 → 确认后调 |
-| delete_task | **高危**：先 detail 确认目标，明确告知软删除但流程上有校验，二次确认 |
-| assign_task | **覆盖式**：展示现有执行者将被替换，确认后调 |
+任何写操作执行前按 `../_shared/write-preview.md` 生成全字段完整预览（模板 U：变更类「现状→执行后」对照；模板 C：创建类全字段含默认值）并经用户确认，执行后回读核验。规则、模板与各工具要点以该文件为唯一事实来源，此处不重复。
 
-批量修改（"把 X、Y、Z 都标完成"）：先列出目标清单 → 用户确认 → 逐条 update → 每条独立报告成败。
+批量修改（"把 X、Y、Z 都标完成"）：逐条完整预览 → 用户确认 → 逐条 update → 每条独立回执与核验。
 
 ## 6. 输出渲染
 
