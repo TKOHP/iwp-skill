@@ -20,6 +20,7 @@
 | [ADR-010](#adr-010mcp-工具集最小化17-个) | MCP 工具集最小化（17 个） | ✅ |
 | [ADR-011](#adr-011技能内置协议自适应-mcp-client2026-09-21取代-client-旧实现) | 协议自适应 MCP client | ✅ |
 | [ADR-012](#adr-012路由结构三分支更名为统一路由表2026-09-23) | 路由结构更名为统一路由表 | ✅ |
+| [ADR-013](#adr-013事前检查与配置引导一体化2026-09-23) | 事前检查与配置引导一体化 | ✅ |
 
 ## ADR-001：路由分三分支等权
 
@@ -235,3 +236,25 @@
 **替代方案**：
 - 「路由决策树」→ 暗示条件优先级与层级求值，与平权原则矛盾，否决
 - update 路由留在表外 → 形成两层路由结构与编外语义，否决
+
+---
+
+## ADR-013：事前检查与配置引导一体化（2026-09-23）
+
+**决策**：新增 `scripts/preflight.py`（仅标准库）作为会话首次调工具前的事前检查入口，一次运行覆盖依赖可导入性（`importlib.util.find_spec`）与 `.env` 存在性；`--probe` 模式经未认证的 `/.well-known/oauth-authorization-server` 探测 MCP server 可达性。配置引导工作流唯一落在 `references/_shared/setup-flow.md`：依赖缺失 → agent 自动 `pip install -r requirements.txt`；`.env` 缺失 → agent 询问 `MCP_PUBLIC_BASE_URL` 并以 `.env.example` 为底稿创建；probe 通过后才进入授权。授权铁律升级为两道检查（第 0 步事前检查 + 第 1 步授权检查），setup 进入统一路由表（维护类）。
+
+**理由**：
+- skills CLI 安装的裸副本无 `.env`，而 `skill_config.py` 对缺失静默回退默认值（127.0.0.1:8000）——远程用户必先经历一次注定失败的 OAuth，报错无指导性
+- `cli.py:39` 顶层导入 httpx 依赖链，缺依赖时裸 traceback 且任何子命令（含诊断类）都无法到达——独立 stdlib 脚本是唯一能在缺依赖时仍可运行的检查点，cli.py 零改动
+- `protocol_selfcheck` 需要本地 token，未授权场景不可用；well-known 元数据端点免认证且 issuer 字段可提前暴露服务端配置错位（如双协议头）
+- README 此前声称「依赖 skill 自动管理」但无对应实现，本决策使其落地
+
+**约束**：
+- `.env` 检查仅存在性：创建路径固定为「agent 复制 `.env.example` 改 URL」，残缺配置不在防御范围
+- probe 失败归 setup-flow，授权后的连接/错误归 failure-modes——以「是否已过 probe」分界
+- 依赖安装目标固定为 requirements.txt 清单；详见 `事前检查与配置引导-方案设计.md`
+
+**替代方案**：
+- preflight 做成 cli.py 子命令 → 缺依赖时 cli.py 在 argparse 前即崩，需重构全部顶层导入，改动面过大，否决
+- 事后触发（等调用报错再引导）→ 远程用户白走一轮授权，否决
+- 依赖缺失时仅报告由用户自装 → 与「开箱即用」目标矛盾，否决

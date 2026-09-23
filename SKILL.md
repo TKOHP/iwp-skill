@@ -21,6 +21,7 @@ iwp skill 是 IWP（创新工作平台）MCP server 的标准 OAuth 2.1 PKCE 客
 | 写周报 / 提交周报 / 查周报 / **根据本周课题任务自动生成周报** | **reports** | 业务 | `references/reports/README.md` |
 | 列出所有 MCP 工具 / 调一个路由未覆盖的工具 / 查某工具参数 schema | **free-mode** | 业务 | `references/free-mode/README.md` |
 | 更新 iwp 技能本身（非业务数据） | **update** | 维护 | `references/_shared/update-flow.md` |
+| 首次使用 / 配置 MCP 地址 / 安装依赖 | **setup** | 维护 | `references/_shared/setup-flow.md` |
 
 所有路由**平权**：无主流程与兜底之分，free-mode 的通配透传是路由模式而非层级兜底。
 
@@ -28,7 +29,10 @@ iwp skill 是 IWP（创新工作平台）MCP server 的标准 OAuth 2.1 PKCE 客
 
 ## 授权铁律（每次调工具前）
 
-任何路由、任何工具调用之前，必须先确认授权态有效（`python cli.py auth status`，返回 `authorized: true` 即有效）。无效或缺失时，按 `references/_shared/auth-flow.md` 执行三方 OAuth 流程（**授权前必读**：授权流程、端口占用、超时与 state 校验的唯一事实来源，本文不重复其步骤）。
+任何路由、任何工具调用之前，按顺序完成两道检查：
+
+0. **事前检查**（会话首次调用前执行一次）：`python scripts/preflight.py` 确认依赖与 `.env` 配置就绪；有缺失时按 `references/_shared/setup-flow.md` 引导用户完成配置（检查分流、创建 `.env`、可达性探测的唯一事实来源）
+1. **授权检查**：`python cli.py auth status` 返回 `authorized: true` 即有效。无效或缺失时，按 `references/_shared/auth-flow.md` 执行三方 OAuth 流程（**授权前必读**：授权流程、端口占用、超时与 state 校验的唯一事实来源，本文不重复其步骤）
 
 ## 调用约定
 

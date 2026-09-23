@@ -2,6 +2,10 @@
 
 用户要求「更新 iwp 技能」时按本文件执行。SKILL.md 只做路由，具体步骤以本文件为准。
 
+> 前提提示：更新可能使 `.env` / 凭证丢失（CLI 直接更新清空技能目录）。更新完成后
+> 若 `python scripts/preflight.py` 报 `env_present: false`，按 `setup-flow.md`
+> 重新引导配置，再走授权检查。
+
 ## Step 1：识别安装形态
 
 技能目录 = 当前 SKILL.md 所在目录（SKILL_DIR）。按以下特征判定：

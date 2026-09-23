@@ -39,23 +39,24 @@ git pull
 
 版本发布模型：push 到 main 即发布新版本（内容哈希判定，无 semver）；当前版本以 `SKILL.md` frontmatter 的 `metadata.version` 为准。
 
-### 2. 安装依赖（skill 自动管理）
+### 2. 安装依赖
 
-依赖见 `requirements.txt`（`cryptography`、`httpx` 两个非标准库）。安装：`pip install -r requirements.txt`。
+依赖见 `requirements.txt`（`cryptography`、`httpx` 两个非标准库）。技能会自动管理：首次使用时 agent 运行事前检查（`python scripts/preflight.py`），发现缺失即执行 `pip install -r requirements.txt`；也可提前手动安装。
 
-### 3. 配置（.env 文件，可选）
+### 3. 配置（.env 文件）
 
-复制 `.env.example` 为技能根目录下的 `.env`，按需修改。**`.env` 是唯一外部配置来源，shell 环境变量不再被读取**——宿主环境的残留变量不会产生干扰。
+技能根目录的 `.env` 是唯一外部配置来源，shell 环境变量不再被读取。**推荐交给 agent 自动完成**：直接开始使用或说一句「配置 iwp」，agent 会按技能内置的配置工作流（`references/_shared/setup-flow.md`）询问 `MCP_PUBLIC_BASE_URL` 并以 `.env.example` 为底稿创建 `.env`；也可手动复制 `.env.example` 为 `.env` 后按需修改。
 
 | 变量 | 默认 | 说明 |
 |------|------|------|
-| `MCP_PUBLIC_BASE_URL` | `http://127.0.0.1:8000` | MCP server 公网入口 |
-| `IWP_FRONTEND_BASE_URL` | `http://127.0.0.1:5173` | IWP SPA origin（**与 MCP server 端 `IWP_FRONTEND_BASE_URL` 必须一致**） |
+| `MCP_PUBLIC_BASE_URL` | `http://127.0.0.1:8000` | MCP server 公网入口（唯一必须按环境确认的项） |
 | `IWP_CLIENT_ID` | `test-client` | OAuth 客户端 ID（必须注册到 MCP server `MCP_ALLOWED_CLIENTS`） |
 | `IWP_REDIRECT_URI` | `http://localhost:9999/callback` | OAuth redirect_uri（必须注册到 MCP `MCP_ALLOWED_REDIRECT_URIS`） |
 | `IWP_LOCAL_CALLBACK_PORT` | `9999` | 本地回调端口 |
 
 ### 4. 第一次使用
+
+agent 在任何工具调用前会先做事前检查（依赖 + `.env`）并按需引导配置，随后进入授权：
 
 ```bash
 # 任何 MCP 工具调用前必须先授权
