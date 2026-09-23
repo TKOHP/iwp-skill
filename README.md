@@ -113,5 +113,6 @@ python cli.py auth finish
 
 当前版本以 `SKILL.md` frontmatter 的 `metadata.version` 为准（单一事实来源），此处仅追加历史条目。
 
+- v1.1.1（2026-09-23）：修复更新工作流的误导性信号——`update.ps1` 状态清单精确枚举且输出带文件名；`auth status` 新增 `reason` 字段（`not_configured` / `expired_or_invalid`）；`update-flow.md` 新增 Step 0 更新前基线与 Step 3 双分支核验；移除用户安装中不存在的 `.env.local` / `.env.server` 模板引用与 dev 测试文件。
 - v1.1.0（2026-09-22）：接入 Vercel skills CLI 分发；快速开始新增获取/更新指导与无损更新脚本 `scripts/update.ps1`；SKILL.md 增加版本元数据与「更新技能」路由（`references/_shared/update-flow.md`）。
 - v1.0.0（2026-09-21）：从 CCBSkillsHub 独立为 standalone 项目；独立前的迭代记录见原仓库 git 历史。
