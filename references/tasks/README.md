@@ -1,4 +1,4 @@
-# 课题任务场景（tasks 分支）
+# 课题任务场景（tasks 路由）
 
 > 本文是场景提示词。工具参数以 MCP `tools/list` 的 inputSchema 为准（**schema 优先**，见 `../_shared/tool-discovery.md`）。
 

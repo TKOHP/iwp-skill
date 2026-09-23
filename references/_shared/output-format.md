@@ -1,6 +1,6 @@
-# 输出格式约定（跨分支）
+# 输出格式约定（跨路由）
 
-> 本文档定义 agent 在 tasks / reports / free-mode 三个分支向用户呈现 MCP 工具结果的统一格式。
+> 本文档定义 agent 在 tasks / reports / free-mode 路由向用户呈现 MCP 工具结果的统一格式。
 
 ## 通用原则
 

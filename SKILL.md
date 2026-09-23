@@ -1,6 +1,8 @@
 ---
 name: iwp
 description: IWP（创新工作平台）MCP 客户端：调用 IWP 后端课题任务与周报工具，OAuth 2.1 授权。触发词：列出我的任务、创建任务、课题任务、周报、提交周报、根据任务生成周报、MCP 工具。
+metadata:
+  version: "1.1.0"
 ---
 
 # iwp skill - 路由器入口
@@ -11,21 +13,22 @@ iwp skill 是 IWP（创新工作平台）MCP server 的标准 OAuth 2.1 PKCE 客
 
 - **工具事实来源是 MCP `tools/list`**：本 skill 只描述场景与工作流，不维护硬编码工具清单——数量与参数以实时发现为准
 
-## 路由规则（先读这里，再进分支）
+## 路由表（先读这里，再按路由执行）
 
-| 用户想做什么 | 场景分支 | 必读参考文件 |
-|--------------|---------|-------------|
-| 列任务 / 建任务 / 改任务 / 删任务 / 分配 / 任务日志 / 找课题 | **tasks** | `references/tasks/README.md` |
-| 写周报 / 提交周报 / 查周报 / **根据本周课题任务自动生成周报** | **reports** | `references/reports/README.md` |
-| 列出所有 MCP 工具 / 调一个分支未覆盖的工具 / 查某工具参数 schema | **free-mode** | `references/free-mode/README.md` |
+| 用户想做什么 | 路由 | 类型 | 参考文件 |
+|--------------|------|------|---------|
+| 列任务 / 建任务 / 改任务 / 删任务 / 分配 / 任务日志 / 找课题 | **tasks** | 业务 | `references/tasks/README.md` |
+| 写周报 / 提交周报 / 查周报 / **根据本周课题任务自动生成周报** | **reports** | 业务 | `references/reports/README.md` |
+| 列出所有 MCP 工具 / 调一个路由未覆盖的工具 / 查某工具参数 schema | **free-mode** | 业务 | `references/free-mode/README.md` |
+| 更新 iwp 技能本身（非业务数据） | **update** | 维护 | `references/_shared/update-flow.md` |
 
-三分支**平级等权**：tasks / reports / free-mode 无主流程与兜底之分（设计记录见 `docs/architecture.md` ADR-001）。
+所有路由**平权**：无主流程与兜底之分，free-mode 的通配透传是路由模式而非层级兜底。
 
 路由命中后：**读对应参考文件 → 按其工作流执行**。
 
 ## 授权铁律（每次调工具前）
 
-任何分支、任何工具调用之前，必须先确认授权态有效（`python cli.py auth status`，返回 `authorized: true` 即有效）。无效或缺失时，按 `references/_shared/auth-flow.md` 执行三方 OAuth 流程（**授权前必读**：授权流程、端口占用、超时与 state 校验的唯一事实来源，本文不重复其步骤）。
+任何路由、任何工具调用之前，必须先确认授权态有效（`python cli.py auth status`，返回 `authorized: true` 即有效）。无效或缺失时，按 `references/_shared/auth-flow.md` 执行三方 OAuth 流程（**授权前必读**：授权流程、端口占用、超时与 state 校验的唯一事实来源，本文不重复其步骤）。
 
 ## 调用约定
 
@@ -41,8 +44,7 @@ iwp skill 是 IWP（创新工作平台）MCP server 的标准 OAuth 2.1 PKCE 客
 
 ## 相关文档
 
-- `references/tasks/README.md` / `references/reports/README.md` / `references/free-mode/README.md` - 三分支场景提示词
+- `references/tasks/README.md` / `references/reports/README.md` / `references/free-mode/README.md` - 业务路由场景提示词；`references/_shared/update-flow.md` - update 路由工作流
 - `references/_shared/` - 授权工作流 / 工具发现（schema 优先）/ 错误码翻译 / 输出格式
 - `cli.py` - 统一 CLI 入口（透传 call / tools / auth / tasks list / selfcheck；输出契约见 SKILL.md 调用约定）
 - `skill_config.py` + `scripts/`（auth / client / token_store / swagger_meta）- 纯基础设施（cli.py 的内部依赖,agent 不直接调用）
-- `docs/architecture.md` / `docs/oauth-flow.md` - 架构决策记录 / OAuth 三方交互详解

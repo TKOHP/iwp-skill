@@ -1,6 +1,6 @@
-# 授权工作流（跨分支共享）
+# 授权工作流（跨路由共享）
 
-> 任何分支、任何工具调用之前必须完成授权检查。本文是 `SKILL.md` 授权铁律的完整版。
+> 任何路由、任何工具调用之前必须完成授权检查。本文是 `SKILL.md` 授权铁律的完整版。
 
 ## 1. 授权态检查
 
@@ -8,7 +8,7 @@
 python cli.py auth status
 ```
 
-- 返回 `authorized: true` → 直接进入分支工作流
+- 返回 `authorized: true` → 直接进入路由工作流
 - 返回 `authorized: false` → 走第 2 节三方流程
 - status 内部会先用 refresh_token 静默续期再判断,避免把"30 分钟 access_token
   过期"误判为需要重授权

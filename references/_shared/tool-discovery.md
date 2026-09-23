@@ -1,4 +1,4 @@
-# 工具发现与调用约定（跨分支共享）
+# 工具发现与调用约定（跨路由共享）
 
 > 本 skill **不维护硬编码的 MCP 工具清单**。工具的事实来源（single source of truth）是 MCP server 的 `tools/list`——它包含每个工具的名称、描述与 `inputSchema`。skill 与 MCP 版本不同步时，本文的约定保证调用路径不炸。
 

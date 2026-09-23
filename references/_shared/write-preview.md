@@ -1,12 +1,12 @@
-# 写操作完整预览（跨分支共享）
+# 写操作完整预览（跨路由共享）
 
-> 本文是 SKILL.md「写操作完整预览」铁律的完整版，也是各分支写操作预览规则的唯一事实来源。任何写操作执行前按本文生成完整预览并取得用户确认。
+> 本文是 SKILL.md「写操作完整预览」铁律的完整版，也是各路由写操作预览规则的唯一事实来源。任何写操作执行前按本文生成完整预览并取得用户确认。
 
 ## 1. 适用范围
 
 任何改变平台数据的工具调用，执行前一律完整预览：
 
-| 场景分支 | 覆盖工具 |
+| 路由 | 覆盖工具 |
 |----------|---------|
 | tasks | create_task、update_task、delete_task、assign_task、add_task_log |
 | reports | create_weekly_report、batch_create_weekly_reports、update_weekly_report（含提交 0→1）、delete_weekly_report |

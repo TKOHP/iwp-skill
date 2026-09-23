@@ -1,5 +1,9 @@
 # OAuth 三方交互详解
 
+> **实现状态**: ✅ 已实现且与代码一致（对照 `scripts/auth.py` / `scripts/client.py` / `scripts/token_store.py`；端口 9999/8000/8001/5000/5173 与 ADR-002/004/005/007 相符）
+> **最后更新**: 2026-09-23
+> 运行时授权工作流的 agent 版见 `references/_shared/auth-flow.md`（本文为人读详解，两者不互相替代）。
+
 > 对应方案文档 `InnovationWorkPlatform-mcp/docs/MCP-OAuth三方改造-方案设计.md` §1.2 流程图 + §2 核心模块设计。
 
 ## 三方角色

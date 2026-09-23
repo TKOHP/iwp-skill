@@ -1,7 +1,7 @@
-# 错误码翻译表（跨分支）
+# 错误码翻译表（跨路由）
 
 > 本文档定义 MCP 错误码到 iwp skill 用户可见提示的翻译规则。
-> 适用于 tasks / reports / free-mode 三个分支。
+> 适用于 tasks / reports / free-mode 路由。
 > CLI 统一错误出口：失败时 stdout 为 `{"ok": false, "error": {"kind", "message", "hint"}}`，
 > 退出码 1（用法错误 2）。`kind` 与 `hint` 已由 cli.py 按下表预翻译，agent 直接采纳；
 > 下表用于理解语义与决定后续动作。
