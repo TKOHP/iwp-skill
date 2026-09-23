@@ -214,7 +214,8 @@ def cmd_auth_start(args: argparse.Namespace) -> int:
                     "callback_ready": info.get("callback_ready"),
                     "timeout_s": info.get("timeout_s"),
                     "hint": (
-                        "用 ask_user 向用户展示 authorize_url;"
+                        "向用户展示 authorize_url(呈现方式见"
+                        " references/_shared/user-interaction.md);"
                         "用户完成浏览器授权后运行 python cli.py auth finish"
                     ),
                 }, None)
@@ -404,7 +405,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = auth_pair.add_parser("status", help="查看授权态")
     p.set_defaults(func=cmd_auth_status)
 
-    p = auth_pair.add_parser("start", help="发起授权(输出 authorize_url 交 ask_user)")
+    p = auth_pair.add_parser("start", help="发起授权(输出 authorize_url 交 agent 向用户展示)")
     p.add_argument("--force", action="store_true",
                    help="忽略现有有效凭证,强制重走授权")
     p.set_defaults(func=cmd_auth_start)

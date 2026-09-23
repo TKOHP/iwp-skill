@@ -82,7 +82,7 @@ python cli.py call list_subjects --args '{"page": 1, "page_size": 100}' --out _s
 ```
 
 ```text
-1. 多个候选时用 ask_user 让用户选择；不要猜测"相近名称"
+1. 多个候选时列出让用户选择（按 `../_shared/user-interaction.md`）；不要猜测"相近名称"
 2. status 语义: 1-进行中, 2-已完成, 3-暂停, 0-储备中（以 inputSchema/工具描述为准）
 ```
 

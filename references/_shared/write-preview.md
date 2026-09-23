@@ -63,7 +63,7 @@ python cli.py call get_weekly_report_detail --args '{"report_id": N}' --out _det
 
 ## 5. 呈现与确认循环
 
-1. 用 ask_user 呈现完整预览，**预览全文放 question 正文**（description 可能被 UI 隐藏）
+1. 按 `user-interaction.md` 呈现完整预览并收集用户确认
 2. 用户对预览中任何字段提出修改（含非本次目标字段）→ 更新写入参数 → 重新合成完整预览 → 再次呈现
 3. 循环到用户对最终版预览明确回应确认/执行
 4. 现状列的数据疑误：说明现状来自平台实时数据，预览只改「执行后」列；确属平台数据错误则引导用户先到平台修正

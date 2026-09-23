@@ -7,7 +7,7 @@
   - 本地回调 server(loopback 双栈 127.0.0.1 + [::1]:9999,后台进程;单脚本 < 30s 阻塞)
   - Token 交换:POST /token code+verifier+resource → tokens
   - 自动续期:401 → refresh_token grant
-  - ask_user 集成:由 SKILL.md 指导 agent 调用
+  - 用户交互集成:呈现方式由 SKILL.md / references/_shared/user-interaction.md 指导
 
 关键工程约束:
   - 单命令阻塞等待 5min 会撞 shell 超时(120/300s)
@@ -595,7 +595,7 @@ def ensure_authorized(*, force_reauth: bool = False) -> dict[str, Any]:
     callback_ready = _wait_callback_ready(skill_config.LOCAL_CALLBACK_PORT)
 
     # 4. 把 URL 写到一个 agent 可读的"next-step"文件;
-    #    SKILL.md 指导 agent 用 ask_user 工具展示给用户。
+    #    SKILL.md 指导 agent 向用户展示(见 user-interaction.md)。
     # 注:verifier 必须也持久化,否则 agent 拿到 code 后没法调 /token 换 access_token
     # (verifier 只活在 ensure_authorized() 的局部变量里,丢了就要重新走流程)
     next_step = skill_config.SKILL_DIR / ".oauth_next_step.json"
@@ -619,7 +619,8 @@ def ensure_authorized(*, force_reauth: bool = False) -> dict[str, Any]:
 
     raise RuntimeError(
         f"需要用户授权。请读取 {next_step} 拿 authorize_url,"
-        f"用 ask_user 工具展示给用户;然后调用 poll_callback_result() 等待回调。"
+        f"向用户展示 authorize_url(呈现方式见 references/_shared/user-interaction.md);"
+        f"然后调用 poll_callback_result() 等待回调。"
         f"授权后本地回调 server (pid={p.pid}) 会自动接收 code。"
     )
 
@@ -652,7 +653,7 @@ def finalize_authorization(*, code: str, verifier: str) -> dict[str, Any]:
 
     用法(agent):
         1. ensure_authorized() → 异常信息拿到 URL
-        2. ask_user 展示 URL
+        2. 向用户展示 URL(见 user-interaction.md)
         3. poll_callback_result() → {code, state}
         4. finalize_authorization(code=..., verifier=...) → token_dict
     """

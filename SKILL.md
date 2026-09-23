@@ -42,13 +42,13 @@ iwp skill 是 IWP（创新工作平台）MCP server 的标准 OAuth 2.1 PKCE 客
 - **高频场景**：`python cli.py tasks list --mine --all`（自动翻页 + 状态标签）；`python cli.py auth status|start|finish|invalidate`
 - **schema 优先**：调用示例仅示意，参数以 `python cli.py tools` 输出的 inputSchema 为准（工具事实来源仍是 MCP `tools/list`）→ `references/_shared/tool-discovery.md`
 - **输出契约**：stdout 永远是 ASCII-safe JSON（任何管道编码下无损不乱码）；需要中文可读的大段结果加 `--out file.json`（UTF-8 文件，用读文件工具查看）。成功 `{"ok":true,...}` 退出码 0；失败 `{"ok":false,"error":{kind,message,hint}}` 退出码 1；用法错误退出码 2
-- 错误翻译 → `references/_shared/failure-modes.md`；输出渲染 → `references/_shared/output-format.md`
+- 错误翻译 → `references/_shared/failure-modes.md`；输出渲染 → `references/_shared/output-format.md`；用户交互呈现（URL/预览/提问的内容位置与无 ask_user 兜底）→ `references/_shared/user-interaction.md`
 - 连接/协商诊断：`python cli.py selfcheck`
 - **写操作完整预览**：任何写操作（create / update / delete / assign / 写日志 / 周报创建与提交，含 free-mode 透传的写工具）执行前，按 `references/_shared/write-preview.md` 生成全字段完整预览并经用户确认，执行后回读核验
 
 ## 相关文档
 
 - `references/tasks/README.md` / `references/reports/README.md` / `references/free-mode/README.md` - 业务路由场景提示词；`references/_shared/update-flow.md` - update 路由工作流
-- `references/_shared/` - 授权工作流 / 工具发现（schema 优先）/ 错误码翻译 / 输出格式
+- `references/_shared/` - 授权工作流 / 工具发现（schema 优先）/ 错误码翻译 / 输出格式 / 用户交互呈现
 - `cli.py` - 统一 CLI 入口（透传 call / tools / auth / tasks list / selfcheck；输出契约见 SKILL.md 调用约定）
 - `skill_config.py` + `scripts/`（auth / client / token_store / swagger_meta）- 纯基础设施（cli.py 的内部依赖,agent 不直接调用）

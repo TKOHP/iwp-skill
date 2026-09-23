@@ -30,8 +30,8 @@ pip install -r requirements.txt
 
 ## 2. `.env` 缺失 → agent 引导创建
 
-1. **用 `ask_user` 询问 `MCP_PUBLIC_BASE_URL`**——本地/远程示例值直接写进
-   question 正文（如本地 `http://127.0.0.1:8000`、远程 `http://<host>:<port>`），
+1. **向用户询问 `MCP_PUBLIC_BASE_URL`**（呈现方式按 `user-interaction.md`）——
+   示例值：本地 `http://127.0.0.1:8000`、远程 `http://<host>:<port>`；
    其余 KEY（`IWP_CLIENT_ID` / `IWP_REDIRECT_URI` / `IWP_LOCAL_CALLBACK_PORT`）
    按 `.env.example` 默认值即可，无需逐项询问
 2. **读 `.env.example` → 写 `.env`**（技能根目录）：仅替换

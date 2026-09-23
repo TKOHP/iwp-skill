@@ -61,7 +61,8 @@ def _check_env() -> tuple[bool, list[str]]:
     if not present:
         hints.append(
             ".env missing -> follow references/_shared/setup-flow.md: "
-            "ask user for MCP_PUBLIC_BASE_URL, create .env from .env.example"
+            "ask user for MCP_PUBLIC_BASE_URL (see user-interaction.md for "
+            "presentation), create .env from .env.example"
         )
     return present, hints
 

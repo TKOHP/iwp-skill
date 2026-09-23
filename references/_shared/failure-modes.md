@@ -12,7 +12,7 @@
 
 | 场景 | CLI 表现 | 处理 |
 |------|----------|------|
-| 无 token 缓存 | `auth start` 返回 `need_user_authorization` + authorize_url | agent 用 ask_user 展示 authorize_url |
+| 无 token 缓存 | `auth start` 返回 `need_user_authorization` + authorize_url | 展示 authorize_url（按 `user-interaction.md`） |
 | 本地 9999 端口被占用 | `auth start` 报错含 `占用进程` 提示 | 用户检查并杀掉占用进程后重试 |
 | 用户 5min 内未完成授权 | `auth finish` 返回 `callback_timeout` | agent 显示"超时"，提示重试 |
 | state 不匹配 | `auth finish` 返回 `state_mismatch` | 显示"安全校验失败，可能是 CSRF 攻击" |
@@ -86,6 +86,6 @@ iwp skill 的 401 处理流程：
 
 1. 不要默默重试
 2. 运行 `python cli.py auth invalidate && python cli.py auth start`
-3. 用 ask_user 展示 `auth start` 输出的 URL
+3. 展示 `auth start` 输出的 URL（按 `user-interaction.md`）
 
 不要尝试"猜 token"或"绕过授权"——绝对禁止。

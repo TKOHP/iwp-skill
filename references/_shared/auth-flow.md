@@ -23,7 +23,7 @@ CLI 把原多步 python 流程收敛为两条命令。`auth start` **不会自�
 1. **运行 `python cli.py auth start`**,拿到 `authorize_url` 与 `state`;
    返回含 `callback_ready` 字段(本地回调端口就绪状态,`ipv4` 恒为 true),
    该探测在交付 URL 前自动完成,无需 agent 额外检查
-2. **用 `ask_user` 工具把 `authorize_url` 展示给用户**——不要用 print 让用户手动复制
+2. **向用户展示 `authorize_url` 并确认授权完成**（呈现与确认方式按 `user-interaction.md`）
 3. 用户在浏览器完成三方流程：
    `MCP server /authorize` → IWP SPA `/oauth-authorize?tx_id=...` →（已登录一键确认；未登录页内登录）→ 确认授权 → 302 回 `http://localhost:9999/callback?code=...&state=...`
    本地 callback server 自动接收 code
