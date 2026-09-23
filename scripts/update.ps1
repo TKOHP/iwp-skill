@@ -42,9 +42,9 @@ foreach ($pat in $statePatterns) {
         }
 }
 if ($backedUp.Count) {
-    Write-Host "已备份 $($backedUp.Count) 个状态文件 -> $backupDir"
+    Write-Host "[BACKUP] $($backedUp.Count) state file(s) -> $backupDir"
 } else {
-    Write-Host '未发现状态文件（未配置或未授权），直接更新'
+    Write-Host '[BACKUP] no state file found (fresh install), updating directly'
 }
 
 $ok = $false
@@ -56,7 +56,7 @@ finally {
     foreach ($name in $backedUp) {
         Copy-Item -LiteralPath (Join-Path $backupDir $name) -Destination (Join-Path $skillDir $name) -Force
     }
-    if ($backedUp.Count) { Write-Host '状态文件已恢复' }
+    if ($backedUp.Count) { Write-Host '[RESTORE] state file(s) restored' }
 }
 
 if ($ok) {
@@ -67,17 +67,17 @@ if ($ok) {
         $hashRestored = (Get-FileHash (Join-Path $skillDir $name)).Hash
         if ($hashBackup -ne $hashRestored) {
             $allMatch = $false
-            Write-Warning "恢复校验不一致: $name"
+            Write-Warning "[VERIFY] hash mismatch: $name"
         }
     }
     if ($allMatch) {
         Remove-Item -LiteralPath $backupDir -Recurse -Force
-        Write-Host '更新完成，备份校验一致已清理'
+        Write-Host '[VERIFY] hashes match; backup cleaned up'
     } else {
-        Write-Warning "更新完成，但存在恢复校验不一致，备份保留在 $backupDir 供排查"
+        Write-Warning "[VERIFY] MISMATCH found; backup kept at $backupDir for inspection"
     }
-    Write-Host '请核验授权: python cli.py auth status'
+    Write-Host '[DONE] verify auth: python cli.py auth status'
 } else {
-    Write-Error "更新失败，状态文件已恢复，备份在 $backupDir"
+    Write-Error "[FAILED] update failed; state file(s) restored; backup at $backupDir"
     exit 1
 }

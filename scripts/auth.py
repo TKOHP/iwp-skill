@@ -4,7 +4,7 @@
   - PKCE 生成(secrets.token_urlsafe(64) + sha256 → base64url)
   - URL 构造:GET /authorize?client_id&redirect_uri&response_type=code&
     code_challenge&code_challenge_method=S256&state&resource
-  - 本地回调 server(127.0.0.1:9999,后台进程;单脚本 < 30s 阻塞)
+  - 本地回调 server(loopback 双栈 127.0.0.1 + [::1]:9999,后台进程;单脚本 < 30s 阻塞)
   - Token 交换:POST /token code+verifier+resource → tokens
   - 自动续期:401 → refresh_token grant
   - ask_user 集成:由 SKILL.md 指导 agent 调用
@@ -12,7 +12,7 @@
 关键工程约束:
   - 单命令阻塞等待 5min 会撞 shell 超时(120/300s)
     → run_local_callback_server 后台启动,agent 分步驱动
-  - 本地回调仅 127.0.0.1;callback handler 验 state + code 存在
+  - 本地回调仅 loopback 双栈(IPv4 + IPv6);callback handler 验 state + code 存在
     → 立即返回 200 HTML;PKCE 保证 code 截获不可兑换
 """
 from __future__ import annotations
@@ -23,6 +23,7 @@ import json
 import logging
 import os
 import secrets
+import socket
 import subprocess
 import sys
 import threading
@@ -227,15 +228,75 @@ h1 {{ font-size: 20px; }}
     return html.encode("utf-8")
 
 
+class _HTTPServerV6(HTTPServer):
+    """IPv6 回环 HTTPServer(仅绑 [::1],保持 loopback-only 安全边界)。
+
+    Windows 默认 AF_INET6 socket 的 IPV6_V6ONLY 语义依系统而定,
+    显式置 1 固化「只接 IPv6 回环」:IPv4 由并存的 AF_INET server 接管,
+    不通过 v4-mapped 地址混栈。
+    """
+
+    address_family = socket.AF_INET6
+
+    def server_bind(self) -> None:
+        self.socket.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+        super().server_bind()
+
+
+def _try_bind_ipv6_loopback(port: int, handler_cls: type) -> HTTPServer | None:
+    """尝试绑定 [::1]:port;失败(如系统禁用 IPv6)返回 None,由调用方降级。"""
+    try:
+        return _HTTPServerV6(("::1", port), handler_cls)
+    except OSError as exc:
+        logger.warning("绑定 [::1]:%d 失败: %s", port, exc)
+        return None
+
+
 def _port_in_use(port: int, host: str = skill_config.LOCAL_CALLBACK_HOST) -> bool:
     """检查端口是否被占用。"""
-    import socket
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         try:
             s.bind((host, port))
             return False
         except OSError:
             return True
+
+
+def _can_connect(host: str, port: int, timeout_s: float = 1.0) -> bool:
+    """探测 host:port 是否可建立 TCP 连接(IPv6 地址需含冒号)。"""
+    family = socket.AF_INET6 if ":" in host else socket.AF_INET
+    with socket.socket(family, socket.SOCK_STREAM) as s:
+        s.settimeout(timeout_s)
+        return s.connect_ex((host, port)) == 0
+
+
+def _wait_callback_ready(port: int, timeout_s: float = 10.0) -> dict[str, bool]:
+    """等待本地回调端口进入监听(IPv4 硬性 / IPv6 软性)。
+
+    消除启动竞态:auth start 的 Popen 到 server 实际 bind 之间有秒级窗口,
+    浏览器先于监听到达会报「localhost 拒绝连接」;交付 URL 前探测到位。
+
+    Returns:
+        {"ipv4": bool, "ipv6": bool};ipv4 恒 True(否则抛 RuntimeError)。
+
+    Raises:
+        RuntimeError: IPv4 超时未监听(回调进程启动即死)
+    """
+    deadline = time.time() + timeout_s
+    v4_ok = _can_connect("127.0.0.1", port)
+    while not v4_ok and time.time() < deadline:
+        time.sleep(0.3)
+        v4_ok = _can_connect("127.0.0.1", port)
+    if not v4_ok:
+        raise RuntimeError(
+            f"本地回调 server 启动失败:127.0.0.1:{port} 在 {timeout_s:.0f}s 内未进入监听"
+            "(进程可能启动即死;检查 python 环境与依赖)"
+        )
+    # IPv6 软探测:双栈绑定失败(系统禁用 IPv6)不阻断授权,状态交由输出字段提示
+    v6_ok = _can_connect("::1", port)
+    if not v6_ok:
+        logger.warning("[::1]:%d 未监听(降级模式);浏览器将 localhost 解析为 ::1 时回调会失败", port)
+    return {"ipv4": True, "ipv6": v6_ok}
 
 
 def _list_listeners(port: int, host: str = skill_config.LOCAL_CALLBACK_HOST):
@@ -287,25 +348,41 @@ def run_local_callback_server(
     result = CallbackResult()
     handler_cls = _make_handler(result, expected_state, result_file)
 
-    server = HTTPServer(
-        (skill_config.LOCAL_CALLBACK_HOST, skill_config.LOCAL_CALLBACK_PORT),
-        handler_cls,
-    )
-    server.timeout = 1.0  # 1s tick 用于主循环检查
+    # loopback 双栈:redirect_uri 用 localhost,浏览器可能解析到 127.0.0.1(IPv4)
+    # 或 ::1(IPv6);只绑单栈时另一栈连接被拒(实测:浏览器报「localhost 拒绝连接」)。
+    # IPv4 与 IPv6 各起一个 server,共享同一 CallbackResult,均保持 loopback-only。
+    servers: list[HTTPServer] = [
+        HTTPServer(
+            (skill_config.LOCAL_CALLBACK_HOST, skill_config.LOCAL_CALLBACK_PORT),
+            handler_cls,
+        )
+    ]
+    v6_server = _try_bind_ipv6_loopback(skill_config.LOCAL_CALLBACK_PORT, handler_cls)
+    if v6_server is not None:
+        servers.append(v6_server)
+    else:
+        logger.warning(
+            "IPv6 回环 [::1]:%d 绑定失败,降级为仅 IPv4", skill_config.LOCAL_CALLBACK_PORT
+        )
+    for server in servers:
+        server.timeout = 1.0  # 1s tick 用于主循环检查
     logger.info(
-        "本地回调 server 启动: %s:%d",
-        skill_config.LOCAL_CALLBACK_HOST,
-        skill_config.LOCAL_CALLBACK_PORT,
+        "本地回调 server 启动: %s",
+        ", ".join(f"{server.server_address[0]}:{server.server_address[1]}" for server in servers),
     )
 
     deadline = time.time() + timeout_s
     try:
         while time.time() < deadline:
-            server.handle_request()
+            for server in servers:
+                server.handle_request()
+                if result.is_received():
+                    break
             if result.is_received():
                 break
     finally:
-        server.server_close()
+        for server in servers:
+            server.server_close()
 
     if not result.is_received():
         logger.warning("本地回调超时(%ds)", timeout_s)
@@ -514,6 +591,9 @@ def ensure_authorized(*, force_reauth: bool = False) -> dict[str, Any]:
         stderr=subprocess.DEVNULL,
     )
 
+    # 3.5 等回调 server 就绪再交付 URL(消除启动竞态与降级态不可见)。
+    callback_ready = _wait_callback_ready(skill_config.LOCAL_CALLBACK_PORT)
+
     # 4. 把 URL 写到一个 agent 可读的"next-step"文件;
     #    SKILL.md 指导 agent 用 ask_user 工具展示给用户。
     # 注:verifier 必须也持久化,否则 agent 拿到 code 后没法调 /token 换 access_token
@@ -526,6 +606,7 @@ def ensure_authorized(*, force_reauth: bool = False) -> dict[str, Any]:
             "code_verifier": verifier,
             "result_file": result_file,
             "callback_pid": p.pid,
+            "callback_ready": callback_ready,
             "timeout_s": skill_config.AUTHORIZE_TIMEOUT_S,
         }, ensure_ascii=False, indent=2),
         encoding="utf-8",

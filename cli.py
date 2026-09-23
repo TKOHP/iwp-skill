@@ -14,7 +14,7 @@
 用法(cwd 建议为技能根目录;内部路径基于 SKILL_DIR,cwd 无关):
   python cli.py auth status
   python cli.py auth start
-  python cli.py auth finish [--code CODE]
+  python cli.py auth finish [--code=CODE]
   python cli.py tasks list --mine --all
   python cli.py call list_subjects --args '{"page": 1}'
   python cli.py tools --refresh
@@ -206,6 +206,7 @@ def cmd_auth_start(args: argparse.Namespace) -> int:
                     "authorize_url": info["authorize_url"],
                     "state": info["expected_state"],
                     "callback_pid": info.get("callback_pid"),
+                    "callback_ready": info.get("callback_ready"),
                     "timeout_s": info.get("timeout_s"),
                     "hint": (
                         "用 ask_user 向用户展示 authorize_url;"
