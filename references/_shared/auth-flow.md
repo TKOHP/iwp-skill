@@ -10,7 +10,9 @@ python cli.py auth status
 ```
 
 - 返回 `authorized: true` → 直接进入路由工作流
-- 返回 `authorized: false` → 走第 2 节三方流程
+- 返回 `authorized: false` 且 `reason: not_configured`（无 `.env` / 无凭证缓存）→
+  授权前提未就绪，先按 `setup-flow.md` 完成配置，再回到本文件
+- 返回 `authorized: false` 且 `reason: expired_or_invalid` → 走第 2 节三方流程
 - status 内部会先用 refresh_token 静默续期再判断,避免把"30 分钟 access_token
   过期"误判为需要重授权
 

@@ -174,7 +174,12 @@ def cmd_auth_status(_args: argparse.Namespace) -> int:
             payload["refreshed"] = True
         payload["hint"] = "授权有效,可直接调用工具"
     else:
-        payload["hint"] = "未授权或已过期: python cli.py auth start"
+        if not tokens:
+            payload["reason"] = "not_configured"
+            payload["hint"] = "无凭证缓存(全新安装或未配置): 先按 setup-flow 配置 .env, 再 python cli.py auth start"
+        else:
+            payload["reason"] = "expired_or_invalid"
+            payload["hint"] = "授权已过期或失效: python cli.py auth start"
     return _emit(payload, None)
 
 

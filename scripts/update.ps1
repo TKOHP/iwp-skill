@@ -19,9 +19,9 @@ if ($link.LinkType) {
     exit 1
 }
 
-# 与 .gitignore 的未跟踪状态文件清单保持一致
+# 用户态状态文件清单（.env.example 被 git 跟踪、不属于状态文件）
 $statePatterns = @(
-    '.env*',
+    '.env',
     '.token_key',
     '.token_cache.enc',
     '.swagger_meta.enc',
@@ -42,7 +42,7 @@ foreach ($pat in $statePatterns) {
         }
 }
 if ($backedUp.Count) {
-    Write-Host "[BACKUP] $($backedUp.Count) state file(s) -> $backupDir"
+    Write-Host "[BACKUP] $($backedUp.Count) state file(s): $($backedUp -join ', ') -> $backupDir"
 } else {
     Write-Host '[BACKUP] no state file found (fresh install), updating directly'
 }
@@ -56,7 +56,7 @@ finally {
     foreach ($name in $backedUp) {
         Copy-Item -LiteralPath (Join-Path $backupDir $name) -Destination (Join-Path $skillDir $name) -Force
     }
-    if ($backedUp.Count) { Write-Host '[RESTORE] state file(s) restored' }
+    if ($backedUp.Count) { Write-Host "[RESTORE] state file(s) restored: $($backedUp -join ', ')" }
 }
 
 if ($ok) {
@@ -78,6 +78,6 @@ if ($ok) {
     }
     Write-Host '[DONE] verify auth: python cli.py auth status'
 } else {
-    Write-Error "[FAILED] update failed; state file(s) restored; backup at $backupDir"
+    Write-Error "[FAILED] update failed; state file(s) restored: $($backedUp -join ', '); backup at $backupDir"
     exit 1
 }
