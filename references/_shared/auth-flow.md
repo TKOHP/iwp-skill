@@ -21,15 +21,23 @@ python cli.py auth status
 CLI 把原多步 python 流程收敛为两条命令。`auth start` **不会自动完成授权**:
 
 1. **运行 `python cli.py auth start`**,拿到 `authorize_url` 与 `state`;
-   返回含 `callback_ready` 字段(本地回调端口就绪状态,`ipv4` 恒为 true),
-   该探测在交付 URL 前自动完成,无需 agent 额外检查
-2. **向用户展示 `authorize_url` 并确认授权完成**（呈现与确认方式按 `user-interaction.md`）
+   返回含 `callback_ready` 字段(本地回调端口就绪状态,`ipv4` 恒为 true)与
+   `browser_opened` 字段(是否已自动打开浏览器;默认尝试打开,失败静默降级),
+   该探测与打开动作在交付 URL 前自动完成,无需 agent 额外检查
+2. **向用户展示 `authorize_url` 后立即进入等待**（呈现方式按 `user-interaction.md`；
+   播报一句"已发起授权，等待你在浏览器完成"）。
+   推进以本地回调到达为准，无需用户口头确认。宿主支持后台执行时，以后台方式运行
+   `python cli.py auth finish --wait <秒>`；否则默认单查运行
+   `python cli.py auth finish`，结果为 `waiting` 时结束回合，待用户任意回复后复查
 3. 用户在浏览器完成三方流程：
    `MCP server /authorize` → IWP SPA `/oauth-authorize?tx_id=...` →（已登录一键确认；未登录页内登录）→ 确认授权 → 302 回 `http://localhost:9999/callback?code=...&state=...`
    本地 callback server 自动接收 code
-4. **运行 `python cli.py auth finish`**——内部完成:轮询回调(默认 300s)→
-   校验 state → code + PKCE verifier 换 token → 写加密缓存 → 清理中间产物
-   （`.oauth_next_step.json` / `.callback_result.json`）
+4. **运行 `python cli.py auth finish`**——默认单查一次立即返回，状态契约：
+   `completed` → 校验 state → code + PKCE verifier 换 token → 写加密缓存 →
+   清理中间产物（`.oauth_next_step.json` / `.callback_result.json`），
+   向用户播报"授权完成"；`waiting` → 回调未到且回调服务存活，稍后复查；
+   `callback_dead` → 授权窗口已过，按 `failure-modes.md` 主动询问用户是否重新发起。
+   `--wait <秒>` 为阻塞轮询（回调服务中途死亡会提前返回）
 
 浏览器最后一跳死亡但授权事务已确认的恢复路径:从 `/oauth/callback` 的 302
 里拿到 code 后,用 `python cli.py auth finish --code=<code>` 手动注入,无需重走。
@@ -40,7 +48,8 @@ argparse 当作参数报 usage error;等号形式对任何 code 都安全。
 
 | 环节 | 约束 |
 |------|------|
-| 总超时 | 5 分钟内必须完成；`auth finish` 轮询超时返回 `callback_timeout` 错误，提示用户重试 |
+| 授权窗口 | 授权事务与回调服务寿命均为 5 分钟（自发起起）；`auth finish --wait` 在等待上限内未完成返回 `callback_timeout`，提示用户确认浏览器授权状态 |
+| 回调服务退出 | 回调服务到期退出仍无回调 → `auth finish` 返回 `callback_dead` → 按 `failure-modes.md` 主动询问用户是否重新发起 |
 | 本地回调端口 | `127.0.0.1:9999` 被占用时 `auth start` 显式报错并给出占用进程信息；让用户处理占用后重试，**不要换端口硬试** |
 | state 校验 | `auth finish` 内部校验回调 `state` 与授权事务一致；不一致返回 `state_mismatch`，按 CSRF 处理，终止流程 |
 | 用户拒绝授权 | `auth finish` 返回 `auth_denied` → 报告用户，不重试不猜测 |

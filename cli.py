@@ -14,7 +14,10 @@
 用法(cwd 建议为技能根目录;内部路径基于 SKILL_DIR,cwd 无关):
   python cli.py auth status
   python cli.py auth start
-  python cli.py auth finish [--code=CODE]
+  python cli.py auth finish            # 单查一次立即返回(waiting/completed/...)
+  python cli.py auth finish --wait 110 # 阻塞轮询至 110s(或后台任务中长轮询)
+  python cli.py auth finish --code=CODE  # 手动注入 code(浏览器最后一跳中断恢复)
+  python cli.py auth doctor            # 授权/连接聚合体检(只读)
   python cli.py tasks list --mine --all
   python cli.py call list_subjects --args '{"page": 1}'
   python cli.py tools --refresh
@@ -38,6 +41,7 @@ if str(SKILL_DIR) not in sys.path:
 
 from scripts import auth, swagger_meta, token_store  # noqa: E402
 from scripts.client import McpClient, call_tool, current_user_id  # noqa: E402
+import skill_config  # noqa: E402
 
 # 任务状态渲染知识(集中一处;参考文件不再各自解释)
 TASK_STATUS_LABELS = {0: "未开始", 1: "进行中", 2: "已完成", 3: "暂停"}
@@ -154,19 +158,28 @@ def cmd_tools(args: argparse.Namespace) -> int:
     }, args.out)
 
 
-def cmd_auth_status(_args: argparse.Namespace) -> int:
+def _auth_state() -> tuple[bool, str, bool]:
+    """授权态判定(含静默续期);status 与 doctor 共用的唯一实现。
+
+    Returns:
+        (authorized, detail, refreshed)
+    """
     tokens = token_store.load()
-    authorized = bool(tokens) and token_store.is_access_token_valid(tokens)
-    refreshed = False
-    if tokens and not authorized:
-        # access_token 30 分钟 TTL 是常态;有 refresh_token 就静默续期后再判断,
-        # 避免误导 agent 走完整重授权
-        try:
-            tokens = auth.auto_refresh_if_needed(tokens)
-            authorized = token_store.is_access_token_valid(tokens)
-            refreshed = authorized
-        except RuntimeError:
-            authorized = False
+    if not tokens:
+        return False, "无凭证缓存", False
+    if token_store.is_access_token_valid(tokens):
+        return True, f"授权有效,user_id={current_user_id()}", False
+    try:
+        tokens = auth.auto_refresh_if_needed(tokens)
+    except RuntimeError:
+        return False, "静默续期失败(refresh_token 失效)", False
+    if token_store.is_access_token_valid(tokens):
+        return True, f"静默续期成功,user_id={current_user_id()}", True
+    return False, "静默续期后仍无效", False
+
+
+def cmd_auth_status(_args: argparse.Namespace) -> int:
+    authorized, _detail, refreshed = _auth_state()
     payload: dict[str, Any] = {"ok": True, "authorized": authorized}
     if authorized:
         payload["user_id"] = current_user_id()
@@ -174,7 +187,7 @@ def cmd_auth_status(_args: argparse.Namespace) -> int:
             payload["refreshed"] = True
         payload["hint"] = "授权有效,可直接调用工具"
     else:
-        if not tokens:
+        if not token_store.load():
             payload["reason"] = "not_configured"
             payload["hint"] = "无凭证缓存(全新安装或未配置): 先按 setup-flow 配置 .env, 再 python cli.py auth start"
         else:
@@ -212,15 +225,68 @@ def cmd_auth_start(args: argparse.Namespace) -> int:
                     "state": info["expected_state"],
                     "callback_pid": info.get("callback_pid"),
                     "callback_ready": info.get("callback_ready"),
+                    "browser_opened": info.get("browser_opened"),
                     "timeout_s": info.get("timeout_s"),
                     "hint": (
                         "向用户展示 authorize_url(呈现方式见"
-                        " references/_shared/user-interaction.md);"
-                        "用户完成浏览器授权后运行 python cli.py auth finish"
+                        " references/_shared/user-interaction.md)后立即进入等待:"
+                        "运行 python cli.py auth finish(宿主支持后台时用 --wait 长轮询);"
+                        "推进以回调到达为准,无需用户口头确认"
                     ),
                 }, None)
         return _fail("auth_flow", str(exc),
                      "检查 MCP server 是否可达(python cli.py selfcheck)", None)
+
+
+def _state_check(payload: dict[str, Any], expected_state: str | None) -> str | None:
+    """回调 payload 的 state 校验;不一致返回错误提示文案,一致返回 None。"""
+    if expected_state and payload.get("state") != expected_state:
+        return "回调 state 与授权事务不一致(按 CSRF 处理)"
+    return None
+
+
+def _finish_exchange(code: str, verifier: str) -> int:
+    """code 换 token 落盘并输出 completed 终态(共享尾段)。"""
+    try:
+        token_dict = auth.finalize_authorization(code=code, verifier=verifier)
+    except Exception as exc:  # noqa: BLE001
+        kind, hint = _classify_exception(exc)
+        return _fail(kind, f"{type(exc).__name__}: {exc}", hint)
+    return _emit({
+        "ok": True,
+        "status": "completed",
+        "authorized": True,
+        "user_id": current_user_id(),
+        "expires_in": token_dict.get("expires_in"),
+        "expires_at": token_dict.get("expires_at"),
+        "hint": "授权完成,可调用工具",
+    }, None)
+
+
+def _handle_callback_payload(payload: dict[str, Any], expected_state: str | None,
+                             verifier: str) -> int:
+    """completed 态 payload 分流:denied / 缺 code / state 校验 / 换 token。"""
+    if payload.get("error"):
+        return _fail("auth_denied",
+                     f"用户拒绝或授权出错: {payload['error']}",
+                     "按拒绝语义终止,不重试")
+    code = payload.get("code")
+    if not code:
+        return _fail("auth_flow", f"回调结果缺少 code: {payload}")
+    err = _state_check(payload, expected_state)
+    if err:
+        return _fail("state_mismatch", err, "重新运行 python cli.py auth start")
+    return _finish_exchange(code, verifier)
+
+
+def _fail_callback_dead(result: dict[str, Any]) -> int:
+    """callback_dead 终态:回调服务已退出仍无回调(授权窗口已过)。"""
+    return _fail(
+        "callback_dead",
+        f"本地回调服务已退出仍无回调(授权发起于 {result.get('elapsed_s')}s 前)",
+        "授权窗口已过:主动询问用户是否重新发起授权;同意则重新运行 "
+        "python cli.py auth start",
+    )
 
 
 def cmd_auth_finish(args: argparse.Namespace) -> int:
@@ -239,39 +305,46 @@ def cmd_auth_finish(args: argparse.Namespace) -> int:
         return _fail("auth_flow", "next_step 缺少 code_verifier",
                      "重新运行 python cli.py auth start")
 
+    # 手动注入路径(浏览器最后一跳中断的恢复;等号形式 --code=<code>)
     if args.code:
-        code = args.code
-    else:
-        try:
-            payload = auth.poll_callback_result(timeout_s=args.timeout)
-        except RuntimeError as exc:
-            return _fail("callback_timeout", str(exc),
-                         "超时:确认浏览器授权是否完成;重试可再运行 auth finish,"
-                         "或重新 auth start")
-        if payload.get("error"):
-            return _fail("auth_denied",
-                         f"用户拒绝或授权出错: {payload['error']}",
-                         "按拒绝语义终止,不重试")
-        code = payload.get("code")
-        if not code:
-            return _fail("auth_flow", f"回调结果缺少 code: {payload}")
-        if expected_state and payload.get("state") != expected_state:
-            return _fail("state_mismatch",
-                         "回调 state 与授权事务不一致(按 CSRF 处理)",
-                         "重新运行 python cli.py auth start")
+        return _finish_exchange(args.code, verifier)
 
-    try:
-        token_dict = auth.finalize_authorization(code=code, verifier=verifier)
-    except Exception as exc:  # noqa: BLE001
-        kind, hint = _classify_exception(exc)
-        return _fail(kind, f"{type(exc).__name__}: {exc}", hint)
+    if args.wait:
+        # --wait N:阻塞轮询至 N 秒;回调服务死亡提前退出,不等满时长
+        deadline = time.time() + args.wait
+        while time.time() < deadline:
+            result = auth.inspect_callback()
+            status = result.get("status")
+            if status == "no_transaction":
+                return _fail("auth_flow", "授权事务不存在或 next_step 损坏",
+                             "重新运行 python cli.py auth start")
+            if status == "completed":
+                return _handle_callback_payload(
+                    result.get("payload", {}), expected_state, verifier)
+            if status == "callback_dead":
+                return _fail_callback_dead(result)
+            time.sleep(1.0)
+        return _fail("callback_timeout", f"等待回调超时({args.wait}s)",
+                     "确认浏览器授权是否完成;回调服务可能仍存活,可继续 --wait 或重新 auth start")
+
+    # 默认:单查一次立即返回(方案 回声授权 §4.2;不阻塞,适配任意宿主 shell 超时)
+    result = auth.inspect_callback()
+    status = result.get("status")
+    if status == "no_transaction":
+        return _fail("auth_flow", "授权事务不存在或 next_step 损坏",
+                     "重新运行 python cli.py auth start")
+    if status == "completed":
+        return _handle_callback_payload(
+            result.get("payload", {}), expected_state, verifier)
+    if status == "callback_dead":
+        return _fail_callback_dead(result)
     return _emit({
         "ok": True,
-        "authorized": True,
-        "user_id": current_user_id(),
-        "expires_in": token_dict.get("expires_in"),
-        "expires_at": token_dict.get("expires_at"),
-        "hint": "授权完成,可调用工具",
+        "status": "waiting",
+        "elapsed_s": result.get("elapsed_s"),
+        "callback_alive": True,
+        "hint": ("等待浏览器授权,回调到达后自动完成;"
+                 "宿主支持后台执行时用 --wait <秒> 长轮询,否则稍后再次运行本命令复查"),
     }, None)
 
 
@@ -279,6 +352,70 @@ def cmd_auth_invalidate(_args: argparse.Namespace) -> int:
     token_store.invalidate()
     return _emit({"ok": True, "invalidated": True,
                   "hint": "本地凭证已清除;重新授权运行 auth start"}, None)
+
+
+def cmd_auth_doctor(_args: argparse.Namespace) -> int:
+    """授权/连接聚合体检(方案 回声授权 §4.3):纯编排复用既有检查,只诊断不修复。"""
+    from scripts import preflight
+
+    checks: list[dict[str, Any]] = []
+
+    def add(name: str, ok: bool, detail: str) -> None:
+        checks.append({"name": name, "ok": bool(ok), "detail": detail})
+
+    # 依赖 / .env / 可达性:复用 preflight 检查函数
+    deps, dep_hints = preflight._check_deps()
+    add("deps", all(v.get("ok") for v in deps.values()),
+        "; ".join(dep_hints) or "httpx/cryptography 均可导入")
+    env_present, env_hints = preflight._check_env()
+    add("env_present", env_present, "; ".join(env_hints) or ".env 存在")
+    probe, probe_hints = preflight._probe()
+    add("probe", bool(probe.get("ok")),
+        "; ".join(probe_hints) or f"issuer={probe.get('issuer', '')}")
+
+    # 授权态:复用 _auth_state(status 同源)
+    authorized, auth_detail, _refreshed = _auth_state()
+    add("authorized", authorized, auth_detail)
+
+    # 回调端口:信息项(占用可能是进行中的授权事务,不算故障)
+    port = skill_config.LOCAL_CALLBACK_PORT
+    if auth._port_in_use(port):
+        listeners = auth._list_listeners(port)
+        pids = ", ".join(str(c.pid) for c in listeners if c.pid) or "未知"
+        add("callback_port", True,
+            f"端口 {port} 占用中(pid={pids};可能是进行中的授权事务)")
+    else:
+        add("callback_port", True, f"端口 {port} 空闲")
+
+    # 回调存活 + 双栈:仅在进行中的授权事务上下文里有意义
+    next_step = SKILL_DIR / ".oauth_next_step.json"
+    if next_step.is_file():
+        result = auth.inspect_callback()
+        status = result.get("status")
+        if status == "waiting":
+            add("callback_liveness", True,
+                f"进行中的授权事务:回调服务存活(已等待 {result.get('elapsed_s')}s)")
+            v6_ok = auth._can_connect("::1", port)
+            add("dual_stack", v6_ok,
+                "IPv6 [::1] 已监听" if v6_ok else
+                "IPv6 [::1] 未监听(降级模式):浏览器将 localhost 解析为 ::1 时回调会失败")
+        elif status == "callback_dead":
+            add("callback_liveness", False,
+                f"进行中的授权事务:回调服务已退出(发起于 {result.get('elapsed_s')}s 前),授权窗口已过")
+            add("dual_stack", True, "无监听服务,跳过")
+        else:  # completed
+            add("callback_liveness", True, "授权事务已有回调结果,待 auth finish 换取 token")
+            add("dual_stack", True, "无监听服务,跳过")
+    else:
+        add("callback_liveness", True, "无进行中的授权事务")
+        add("dual_stack", True, "无进行中的授权事务,跳过")
+
+    passed = sum(1 for c in checks if c["ok"])
+    return _emit({
+        "ok": all(c["ok"] for c in checks),
+        "summary": f"{passed}/{len(checks)} 项通过",
+        "checks": checks,
+    }, None)
 
 
 def _normalize_task_items(data: dict[str, Any]) -> list[dict[str, Any]]:
@@ -410,11 +547,18 @@ def build_parser() -> argparse.ArgumentParser:
                    help="忽略现有有效凭证,强制重走授权")
     p.set_defaults(func=cmd_auth_start)
 
-    p = auth_pair.add_parser("finish", help="等待回调并换取 token(轮询+state 校验+落盘)")
+    p = auth_pair.add_parser("finish",
+                             help="检查/等待回调并换取 token(默认单查立即返回)")
     p.add_argument("--code", default=None,
-                   help="手动注入 authorization code(浏览器最后一跳中断时的恢复路径)")
-    p.add_argument("--timeout", type=int, default=300, help="轮询超时秒数(默认 300)")
+                   help="手动注入 authorization code(浏览器最后一跳中断时的恢复路径;"
+                        "code 常以 - 开头,必须用等号形式 --code=<code>)")
+    p.add_argument("--wait", type=int, default=0, metavar="SECONDS",
+                   help="阻塞轮询秒数(默认 0=单查一次立即返回;"
+                        "后台任务中建议 --wait 110)")
     p.set_defaults(func=cmd_auth_finish)
+
+    p = auth_pair.add_parser("doctor", help="授权/连接聚合体检(只读,纯编排)")
+    p.set_defaults(func=cmd_auth_doctor)
 
     p = auth_pair.add_parser("invalidate", help="作废本地缓存凭证")
     p.set_defaults(func=cmd_auth_invalidate)

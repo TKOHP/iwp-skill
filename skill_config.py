@@ -77,6 +77,8 @@ CLIENT_ID = _cfg("IWP_CLIENT_ID", "test-client")
 REDIRECT_URI = _cfg("IWP_REDIRECT_URI", "http://localhost:9999/callback")
 LOCAL_CALLBACK_HOST = "127.0.0.1"
 LOCAL_CALLBACK_PORT = int(_cfg("IWP_LOCAL_CALLBACK_PORT", "9999"))
+# auth start 是否自动打开浏览器(默认开;0=仅返回 URL 由用户手动访问)
+IWP_AUTO_OPEN = _cfg("IWP_AUTO_OPEN", "1") == "1"
 
 # === PKCE / 授权参数 ===
 AUTHORIZE_TIMEOUT_S = 300  # 5 分钟(与 MCP 事务 TTL 一致)
@@ -85,15 +87,14 @@ STATE_BYTES = 16  # secrets.token_urlsafe(16) = 22 字符 base64url
 # === Token 缓存(本机 Fernet 加密) ===
 TOKEN_KEY_PATH = SKILL_DIR / ".token_key"  # Fernet key,权限 600
 TOKEN_CACHE_PATH = SKILL_DIR / ".token_cache.enc"  # Fernet 加密的 JSON
-TOKEN_KEY_TTL_S = 30 * 24 * 3600  # 30 天(refresh_token TTL 对齐)
+TOKEN_KEY_TTL_S = 30 * 24 * 3600  # 30 天(Fernet key 与加密缓存文件的保留周期)
 
 # === Swagger 缓存(tool 列表本地化,减少 RPC) ===
 SWAGGER_META_PATH = SKILL_DIR / ".swagger_meta.enc"
 SWAGGER_META_TTL_S = 30 * 24 * 3600  # 30 天
 
 # === Token 寿命 / 缓存策略 ===
-MCP_ACCESS_TOKEN_TTL_S = 1800  # 30 分钟(JWT exp)
-IWP_REFRESH_TOKEN_TTL_S = 30 * 24 * 3600  # 30 天
+MCP_ACCESS_TOKEN_TTL_S = 1800  # 30 分钟(JWT exp,实际以 /token 响应 expires_in 为准)
 # 提前 5 分钟续期
 REFRESH_LEEWAY_S = 5 * 60
 

@@ -29,6 +29,7 @@ import sys
 import threading
 import time
 import urllib.parse
+import webbrowser
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Any
@@ -179,7 +180,7 @@ def _make_handler(result: CallbackResult, expected_state: str, result_file: str)
                 result.set_success(code, state)
                 body = _render_html(
                     "授权成功",
-                    "<p>可关闭此窗口返回终端。</p>"
+                    "<p>回到对话即可，无需其他操作。</p>"
                     "<p style='color:#888;font-size:12px'>"
                     "MCP server 正在向本地 :9999 写入 code,agent 将自动继续。</p>",
                 )
@@ -594,6 +595,16 @@ def ensure_authorized(*, force_reauth: bool = False) -> dict[str, Any]:
     # 3.5 等回调 server 就绪再交付 URL(消除启动竞态与降级态不可见)。
     callback_ready = _wait_callback_ready(skill_config.LOCAL_CALLBACK_PORT)
 
+    # 3.6 自动打开浏览器(方案 回声授权 §4.1)。
+    # 时序铁律:必须在就绪探测通过之后;失败静默降级,URL 仍由 agent 正文呈现。
+    browser_opened = False
+    if skill_config.IWP_AUTO_OPEN:
+        try:
+            browser_opened = webbrowser.open(url)
+        except Exception as exc:  # noqa: BLE001 - 无桌面/远程环境等,静默降级
+            logger.warning("自动打开浏览器失败(降级为手动访问): %s", exc)
+            browser_opened = False
+
     # 4. 把 URL 写到一个 agent 可读的"next-step"文件;
     #    SKILL.md 指导 agent 向用户展示(见 user-interaction.md)。
     # 注:verifier 必须也持久化,否则 agent 拿到 code 后没法调 /token 换 access_token
@@ -607,6 +618,7 @@ def ensure_authorized(*, force_reauth: bool = False) -> dict[str, Any]:
             "result_file": result_file,
             "callback_pid": p.pid,
             "callback_ready": callback_ready,
+            "browser_opened": browser_opened,
             "timeout_s": skill_config.AUTHORIZE_TIMEOUT_S,
         }, ensure_ascii=False, indent=2),
         encoding="utf-8",
@@ -646,6 +658,63 @@ def poll_callback_result(*, timeout_s: int = 300) -> dict[str, Any]:
                 pass
         time.sleep(1.0)
     raise RuntimeError(f"等待回调超时({timeout_s}s)")
+
+
+def _pid_alive(pid: int) -> bool:
+    """进程是否存活(psutil 可用时;否则保守返回 False)。"""
+    try:
+        import psutil
+    except ImportError:
+        return False
+    try:
+        return psutil.pid_exists(int(pid))
+    except (TypeError, ValueError):
+        return False
+
+
+def inspect_callback() -> dict[str, Any]:
+    """单次检查回调状态(方案 回声授权 §4.2 状态契约;不阻塞,立即返回)。
+
+    Returns:
+        {status, ...}:
+        - completed: 回调已到达(result 文件有 code/error),附 payload
+        - waiting:   回调服务存活且暂无回调,附 elapsed_s/callback_alive
+        - callback_dead: 回调服务已退出仍无回调(授权窗口已过),附 elapsed_s
+        - no_transaction: 无 .oauth_next_step.json(授权事务不存在/损坏)
+
+    state 校验与 token 交换由调用方(CLI)完成,本函数只做只读探测。
+    """
+    next_step = skill_config.SKILL_DIR / ".oauth_next_step.json"
+    if not next_step.is_file():
+        return {"status": "no_transaction"}
+    try:
+        info = json.loads(next_step.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {"status": "no_transaction"}
+
+    result_file = skill_config.SKILL_DIR / ".callback_result.json"
+    if result_file.is_file():
+        try:
+            payload = json.loads(result_file.read_text(encoding="utf-8"))
+            if payload.get("code") or payload.get("error"):
+                return {"status": "completed", "payload": payload}
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    try:
+        elapsed_s = max(0, int(time.time() - next_step.stat().st_mtime))
+    except OSError:
+        elapsed_s = 0
+
+    # 存活判定:端口可连 或 进程仍在(端口探测是主信号,进程存活是兜底)
+    alive = _can_connect("127.0.0.1", skill_config.LOCAL_CALLBACK_PORT)
+    if not alive:
+        pid = info.get("callback_pid")
+        if pid and _pid_alive(pid):
+            alive = True
+    if alive:
+        return {"status": "waiting", "elapsed_s": elapsed_s, "callback_alive": True}
+    return {"status": "callback_dead", "elapsed_s": elapsed_s, "callback_alive": False}
 
 
 def finalize_authorization(*, code: str, verifier: str) -> dict[str, Any]:

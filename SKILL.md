@@ -39,7 +39,7 @@ iwp skill 是 IWP（创新工作平台）MCP server 的标准 OAuth 2.1 PKCE 客
 所有工具调用走统一 CLI 入口：技能根目录 `cli.py`（内部路径基于 SKILL_DIR 解析，cwd 无关；文档示例约定 `cd` 到技能目录后执行）。
 
 - **透传**：`python cli.py call <工具名> --args '<JSON 对象>'`；参数含中文或复杂结构时改用 `--args-file <file.json>`（bash 内联 JSON 会被转码，禁止内联中文参数）
-- **高频场景**：`python cli.py tasks list --mine --all`（自动翻页 + 状态标签）；`python cli.py auth status|start|finish|invalidate`
+- **高频场景**：`python cli.py tasks list --mine --all`（自动翻页 + 状态标签）；`python cli.py auth status|start|finish|invalidate|doctor`
 - **schema 优先**：调用示例仅示意，参数以 `python cli.py tools` 输出的 inputSchema 为准（工具事实来源仍是 MCP `tools/list`）→ `references/_shared/tool-discovery.md`
 - **输出契约**：stdout 永远是 ASCII-safe JSON（任何管道编码下无损不乱码）；需要中文可读的大段结果加 `--out file.json`（UTF-8 文件，用读文件工具查看）。成功 `{"ok":true,...}` 退出码 0；失败 `{"ok":false,"error":{kind,message,hint}}` 退出码 1；用法错误退出码 2
 - 错误翻译 → `references/_shared/failure-modes.md`；输出渲染 → `references/_shared/output-format.md`；用户交互呈现（URL/预览/提问的内容位置与无 ask_user 兜底）→ `references/_shared/user-interaction.md`

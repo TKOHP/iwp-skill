@@ -12,9 +12,10 @@
 
 | 场景 | CLI 表现 | 处理 |
 |------|----------|------|
-| 无 token 缓存 | `auth start` 返回 `need_user_authorization` + authorize_url | 展示 authorize_url（按 `user-interaction.md`） |
+| 无 token 缓存 | `auth start` 返回 `need_user_authorization` + authorize_url | 展示 authorize_url（按 `user-interaction.md`）后立即进入等待 |
 | 本地 9999 端口被占用 | `auth start` 报错含 `占用进程` 提示 | 用户检查并杀掉占用进程后重试 |
-| 用户 5min 内未完成授权 | `auth finish` 返回 `callback_timeout` | agent 显示"超时"，提示重试 |
+| 用户长时间未完成授权（`--wait` 等待上限） | `auth finish --wait` 返回 `callback_timeout` | 确认浏览器授权状态；回调服务可能仍存活，可继续 `--wait` 或重新 `auth start` |
+| 回调服务退出仍无回调（授权窗口已过） | `auth finish` 返回 `callback_dead` | **主动询问用户"是否重新发起授权"**；同意则重新运行 `python cli.py auth start` |
 | state 不匹配 | `auth finish` 返回 `state_mismatch` | 显示"安全校验失败，可能是 CSRF 攻击" |
 | 用户拒绝授权 | `auth finish` 返回 `auth_denied` | 报告用户，不重试不猜测 |
 | 时间戳偏差 > 60s | iwp_confirm 返回 401 | IWP 端时钟问题；联系管理员 |
@@ -61,6 +62,8 @@
 | MCP 响应超时 | `httpx.ReadTimeout` | "MCP server 响应超时，请稍后重试" |
 | MCP 响应非 JSON | JSONDecodeError | "MCP 返回异常，请联系管理员" |
 
+> 授权/连接排障统一入口：`python cli.py auth doctor`（只诊断不修复，输出依赖/配置/可达/授权态/回调端口/双栈/回调存活体检表）。
+
 ## 重试策略（自动）
 
 | 错误类别 | 重试 | 备注 |
@@ -79,6 +82,15 @@ iwp skill 的 401 处理流程：
 3. 若 refresh 成功：用新 token 重试 1 次
 4. 若 refresh 失败：`token_store.invalidate()` + 抛 `McpAuthExpiredError`
 5. CLI 将其预分类为 `auth_expired` → agent 运行 `python cli.py auth invalidate && python cli.py auth start` 重新走 OAuth
+
+## 授权链断开的原因分类
+
+引导重新授权时，按报错来源向用户说明断链原因（两类现象、两种原因）：
+
+| 现象 | 原因 | 说明 |
+|------|------|------|
+| `auth finish` / token 刷新报 `invalid_grant` | MCP refresh_token 7 天滚动窗口断裂 | 连续 7 天未使用技能所致；每次成功续期会滚动重置窗口 |
+| 调工具报 `iwp_credential_expired` | IWP Web 端登出 / 被封禁 / 单活跃会话被踢 | MCP refresh_token 本身可能仍有效，但其背后代持的 IWP 凭证链已断 |
 
 ## 何时停止重试 + 引导用户
 
