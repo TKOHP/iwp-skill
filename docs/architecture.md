@@ -135,7 +135,7 @@
 
 ## ADR-008：iwp skill 客户端 client_id 静态白名单
 
-**决策**：iwp skill 用静态 `client_id=test-client`，注册到 MCP `MCP_ALLOWED_CLIENTS`。
+**决策**：iwp skill 用静态 `client_id=iwp-skill`（2026-10-08 由测试名 test-client 更名），注册到 MCP `MCP_ALLOWED_CLIENTS`。
 
 **理由**：
 - 本地 skill 无法托管 `/.well-known/oauth-client.json`（CIMD）

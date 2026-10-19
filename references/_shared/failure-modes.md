@@ -27,6 +27,7 @@
 | `invalid_target` | resource 不匹配或缺失 | "OAuth resource 参数错误，请检查 MCP_PUBLIC_BASE_URL 配置" |
 | `invalid_grant` | code / refresh_token 无效或已使用 | "授权凭证无效或已被使用，请重新授权" |
 | `unsupported_grant_type` | grant_type 不在白名单 | "OAuth grant 类型不支持（一般不会出现）" |
+| `invalid_request`（`auth start` 报 "client_id 未在白名单"） | skill 的 `IWP_CLIENT_ID` 不在服务端 `MCP_ALLOWED_CLIENTS` | "客户端身份未注册：两侧配置必须逐字一致（当前统一为 `iwp-skill`）——skill `.env` 的 `IWP_CLIENT_ID` ↔ server `.env` 的 `MCP_ALLOWED_CLIENTS`；改服务端后需重启 server，再重新授权" |
 
 ### 3. MCP server 端（鉴权层）
 
@@ -90,6 +91,7 @@ iwp skill 的 401 处理流程：
 | 现象 | 原因 | 说明 |
 |------|------|------|
 | `auth finish` / token 刷新报 `invalid_grant` | MCP refresh_token 7 天滚动窗口断裂 | 连续 7 天未使用技能所致；每次成功续期会滚动重置窗口 |
+| token 刷新报 `invalid_grant`（此前一直正常，近期改过 client_id） | client_id 与签发时不一致（refresh_token 元数据绑定签发时的 client_id） | 两侧 client_id 同步改动后重新授权一次即可 |
 | 调工具报 `iwp_credential_expired` | IWP Web 端登出 / 被封禁 / 单活跃会话被踢 | MCP refresh_token 本身可能仍有效，但其背后代持的 IWP 凭证链已断 |
 
 ## 何时停止重试 + 引导用户
