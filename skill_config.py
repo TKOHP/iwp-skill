@@ -71,8 +71,8 @@ MCP_JWKS_ENDPOINT = f"{MCP_PUBLIC_BASE_URL}/jwks"
 MCP_TOOLS_ENDPOINT = f"{MCP_PUBLIC_BASE_URL}/mcp"  # Streamable HTTP
 
 # === OAuth 客户端身份 ===
-# 阶段 1:本地 skill 用静态 client_id,必须注册到 MCP_ALLOWED_CLIENTS
-CLIENT_ID = _cfg("IWP_CLIENT_ID", "test-client")
+# 阶段 1:本地 skill 用静态 client_id,必须与服务端 MCP_ALLOWED_CLIENTS 逐字一致
+CLIENT_ID = _cfg("IWP_CLIENT_ID", "iwp-skill")
 # 本地回调 server(127.0.0.1 独占端口;与 MCP_ALLOWED_REDIRECT_URIS 一致)
 REDIRECT_URI = _cfg("IWP_REDIRECT_URI", "http://localhost:9999/callback")
 LOCAL_CALLBACK_HOST = "127.0.0.1"
