@@ -1,6 +1,6 @@
 # 课题任务场景（tasks 路由）
 
-> 本文是场景提示词。工具参数以 MCP `tools/list` 的 inputSchema 为准（**schema 优先**，见 `../_shared/tool-discovery.md`）。
+> 本文是场景提示词。工具参数以 MCP `tools/list` 的 inputSchema 为准（**schema 优先**，见 `../_shared/tool-discovery.md`）；平台领域口径（状态枚举、实体层级）见 `../_shared/domain-model.md`。
 
 ## 1. 场景识别（何时路由到这里）
 
@@ -35,6 +35,9 @@ python cli.py tasks list --subject 26 --all --out _subject_tasks.json
 # 单个任务详情 / 任务日志(透传)
 python cli.py call get_task_detail --args '{"task_id": 132}'
 python cli.py call get_task_logs --args '{"task_id": 132, "page": 1, "page_size": 20}'
+
+# 子任务列表(核对父子拆分;非父任务执行者时后端报 404 属预期,语义见工具 description)
+python cli.py call get_task_children --args '{"task_id": 132}'
 ```
 
 用户没说状态时不臆造过滤条件；列表为空时如实说明。
@@ -58,7 +61,8 @@ python cli.py call get_task_logs --args '{"task_id": 132, "page": 1, "page_size"
 ```bash
 # 更新:  生成完整预览（见 §5）→ 确认后调 → 回读核验
 python cli.py call update_task --args-file _args.json
-# _args.json: {"task_id": 132, "status": "completed"}   (其余可选字段以 inputSchema 为准)
+# _args.json: {"task_id": 132, "status": "completed"}
+# 可改字段远不止状态(标题/描述/紧急度/进度/日期/里程碑/换父等),全量以 inputSchema 为准
 
 # 删除:  高危，见 §5
 python cli.py call delete_task --args '{"task_id": 132}'
@@ -83,7 +87,7 @@ python cli.py call list_subjects --args '{"page": 1, "page_size": 100}' --out _s
 
 ```text
 1. 多个候选时列出让用户选择（按 `../_shared/user-interaction.md`）；不要猜测"相近名称"
-2. status 语义: 1-进行中, 2-已完成, 3-暂停, 0-储备中（以 inputSchema/工具描述为准）
+2. 课题 status 枚举语义见 `../_shared/domain-model.md` §2——注意与任务枚举区分（课题 3=暂停，任务 3=已取消）
 ```
 
 ## 4. 调用约定

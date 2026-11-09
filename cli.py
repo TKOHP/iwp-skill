@@ -19,6 +19,7 @@
   python cli.py auth finish --code=CODE  # 手动注入 code(浏览器最后一跳中断恢复)
   python cli.py auth doctor            # 授权/连接聚合体检(只读)
   python cli.py tasks list --mine --all
+  python cli.py reports material --out _w2_material.json
   python cli.py call list_subjects --args '{"page": 1}'
   python cli.py tools --refresh
   python cli.py selfcheck
@@ -39,12 +40,9 @@ SKILL_DIR = Path(__file__).resolve().parent
 if str(SKILL_DIR) not in sys.path:
     sys.path.insert(0, str(SKILL_DIR))
 
-from scripts import auth, swagger_meta, token_store  # noqa: E402
+from scripts import auth, material, swagger_meta, token_store  # noqa: E402
 from scripts.client import McpClient, call_tool, current_user_id  # noqa: E402
 import skill_config  # noqa: E402
-
-# 任务状态渲染知识(集中一处;参考文件不再各自解释)
-TASK_STATUS_LABELS = {0: "未开始", 1: "进行中", 2: "已完成", 3: "暂停"}
 
 EXIT_OK = 0
 EXIT_FAIL = 1
@@ -85,6 +83,11 @@ def _classify_exception(exc: Exception) -> tuple[str, str]:
     """异常 → (kind, hint)。错误翻译与 failure-modes.md 口径一致。"""
     name = type(exc).__name__
     text = str(exc)
+    if "数据过大" in text or "被服务端截断" in text:
+        return "response_truncated", (
+            "服务端响应超 MCP 输出上限(32KB)被截断:"
+            "降低分页大小或缩小数据范围后重试"
+        )
     if "Invalid Host header" in text:
         return "server_host_rejected", (
             "服务端 Host 白名单拒绝(421)。检查 MCP server .env 的 "
@@ -428,9 +431,9 @@ def _normalize_task_items(data: dict[str, Any]) -> list[dict[str, Any]]:
 
 def _with_status_labels(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     for item in items:
-        status = item.get("status")
-        if isinstance(status, int) and status in TASK_STATUS_LABELS:
-            item["status_label"] = TASK_STATUS_LABELS[status]
+        label = skill_config.TASK_STATUS_LABELS.get(item.get("status"))
+        if label:
+            item["status_label"] = label
     return items
 
 
@@ -486,6 +489,33 @@ def cmd_tasks_list(args: argparse.Namespace) -> int:
         "page_size": page_size if args.all else args.size,
         "items": items,
     }, args.out)
+
+
+def cmd_reports_material(args: argparse.Namespace) -> int:
+    """周报素材:筛选本周任务并补全字段(智能生成周报的输入,方案 §4.2)。"""
+    if args.week == "current":
+        week_id = None
+    else:
+        try:
+            week_id = int(args.week)
+        except ValueError:
+            print(json.dumps({"ok": False, "error": {
+                "kind": "usage",
+                "message": f"--week 取值非法: {args.week}",
+                "hint": "current(当前周)或工作周数字 ID"
+                        "(可经 python cli.py tools 查看 list_work_weeks)",
+            }}, ensure_ascii=True))
+            return EXIT_USAGE
+    try:
+        payload = material.build_material(call_tool, week_id=week_id)
+    except ValueError as exc:
+        # 素材组装的形状/截断类失败(material.normalize_result 抛出),精确转述
+        return _fail("material_input", f"{exc}",
+                     "素材组装失败;若涉及截断请缩小数据范围,其余按 message 排查", args.out)
+    except Exception as exc:  # noqa: BLE001 - 统一错误契约
+        kind, hint = _classify_exception(exc)
+        return _fail(kind, f"{type(exc).__name__}: {exc}", hint, args.out)
+    return _emit(payload, args.out)
 
 
 def cmd_selfcheck(_args: argparse.Namespace) -> int:
@@ -577,6 +607,19 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--size", type=int, default=50, help="每页数量(默认 50,上限 100)")
     _add_out_option(p)
     p.set_defaults(func=cmd_tasks_list)
+
+    reports_sub = sub.add_parser("reports", help="周报高频场景")
+    reports_pair = reports_sub.add_subparsers(dest="reports_command", required=True)
+
+    p = reports_pair.add_parser(
+        "material",
+        help="周报素材:筛选本周任务(进行中/已完成且日期与工作周重叠)"
+             "并逐条补全字段,按课题分组输出(智能生成周报的输入)")
+    p.add_argument("--week", default="current", metavar="current|ID",
+                   help="工作周:current=包含今天的进行中工作周(默认);"
+                        "或工作周数字 ID(补写历史周)")
+    _add_out_option(p)
+    p.set_defaults(func=cmd_reports_material)
 
     return parser
 

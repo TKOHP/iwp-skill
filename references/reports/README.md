@@ -1,6 +1,6 @@
 # 周报场景（reports 路由）
 
-> 本文是场景提示词。工具参数以 MCP `tools/list` 的 inputSchema 为准（**schema 优先**，见 `../_shared/tool-discovery.md`）。
+> 本文是场景提示词。工具参数以 MCP `tools/list` 的 inputSchema 为准（**schema 优先**，见 `../_shared/tool-discovery.md`）；平台领域口径（状态枚举、实体层级、周报字段语义）见 `../_shared/domain-model.md`。
 
 ## 1. 场景识别（何时路由到这里）
 
@@ -9,10 +9,11 @@
 | "帮我写本周周报" / "提交周报" / "建一条周报" | ✅ 子工作流 W1 |
 | "批量提交本周所有周报" | ✅ 子工作流 W1（批量） |
 | **"根据我本周的任务生成周报"** / "按课题任务写周报" | ✅ 子工作流 W2 |
+| "补写某历史周的周报" | ✅ W1 或 W2（指定历史工作周，见 §6 工作周发现） |
 | "查我的周报" / "这周谁还没交" / "看一下周报 X" | ✅ 子工作流 W3 |
 | "改一下周报 X" / "删除周报 X" | ✅ 子工作流 W3 |
 
-**"根据课题任务生成周报"是本路由内的子工作流，与手动创建等权**，不是独立路由，也不是 W1 的附属。判断依据：交付物是周报，任务查询只是数据来源（复用 tasks 场景的查询工具，见 `../tasks/README.md` W1）。
+**"根据课题任务生成周报"是本路由内的子工作流，与手动创建等权**，不是独立路由，也不是 W1 的附属。判断依据：交付物是周报，任务查询只是数据来源。
 
 ## 2. 前置授权检查
 
@@ -25,60 +26,114 @@
    python cli.py call get_current_work_week --args '{}' --out _week.json
    → result.work_week.id = work_week_id
    → result.identity = {user_id, real_name, org_id, org_name}
-   （指定历史周: --args '{"work_week_id": N}'）
+   （补写历史周:先经 §6 工作周发现拿 work_week_id,再传 {"work_week_id": N}）
 2. 起草周报内容: work_name / work_content / work_result
-   （用户给了素材就整理；没给就先问，不要编造工作内容）
-3. 生成完整预览（见 §5），确认后创建（含中文参数必须走 --args-file，以 inputSchema 为准）:
+   （字段内容语义见 ../_shared/domain-model.md §4;用户给了素材就整理,
+   没给就先问,不得编造工作内容）
+3. 生成完整预览（见 §5），确认后创建（含中文参数必须走 --args-file，
+   参数以 inputSchema 为准）:
    单条 → python cli.py call create_weekly_report --args-file _args.json
-          # {"work_week_id": N, "user_id": N, "org_id": N, "work_name": "...",
-          #  "work_content": "...", "work_result": "...", "is_submitted": 0}
    多条 → python cli.py call batch_create_weekly_reports --args-file _args.json
-          # {"work_week_id": N, "user_id": N, "org_id": N, "reports": [...]}
 4. 回执: 周报 ID + 提交状态
 ```
 
-默认 `is_submitted=0`（草稿）；**用户明确说"提交"才置 1**。
+**缺省不提交；用户明确说「提交」才置提交**（提交动作的预览规则见 `../_shared/write-preview.md` 工具要点表）。
 
-## 4. 子工作流 W2：根据课题任务生成周报
+## 4. 子工作流 W2：根据课题任务生成周报（智能生成）
+
+分工铁律：**筛选与丰富化由素材命令代码完成，周报文本由 LLM 智能生成**——不是机械拼装，也不只是润色。
 
 ```text
-1. 拿三元组: 同 W1 第 1 步（work_week_id + identity）
-2. 收集任务素材:
-   a. python cli.py tasks list --mine --all --out _my_tasks.json
-      → 按工作周起止日期过滤（start_date ~ end_date 与任务计划/更新日期比对）
-   b. 关键任务补细节: python cli.py call get_task_logs --args '{"task_id": N}'
-   c. 需要按课题组织时: python cli.py call list_subjects --args '{}' 定位课题
-      （任务查询工具的完整用法见 ../tasks/README.md W1/W4）
-3. 按课题聚合起草:
-   每课题一条 → work_name=课题或事项名, work_content=做了什么, work_result=产出/进度
-4. **逐条完整预览给用户确认**（模板 C 全字段区块，任务 → 周报的映射是 LLM 生成的，
-   必须让用户过目，防止把未完成事项写成成果；见 ../_shared/write-preview.md）
-5. 确认后: 单条 → create_weekly_report；多条 → batch_create_weekly_reports
-   （每条可带各自 subject_id；默认 is_submitted=0）
+1. 取材料（一次调用同时拿到三元组与筛选后任务材料,无需再调工作周接口）:
+   python cli.py reports material --out _w2_material.json
+   → work_week + identity + subjects[].tasks[]（含描述/进度/状态标签,
+     已按课题分组;字段以实际输出为准）
+2. LLM 智能生成（按课题聚合,每课题一条周报）:
+   2a 定形态:默认 A「成果句」;材料性质指向 B/C/D 时推荐并说明理由,由用户定
+   2b 写三点:work_name / work_content / work_result 共用一套编号,第 n 点讲同一件事
+   结构、形态与读者口径见下方三节
+3. 溯源预览（模板 C 全字段区块 + 溯源行,呈现规则见 ../_shared/write-preview.md）:
+   - 每条周报区块附「来源任务」行(task_id/标题/状态/进度)
+   - 双向覆盖判据:每条周报的来源可对应材料中的真实任务;
+     材料中每条任务要么被某条周报引用,要么在预览中说明未采用原因——不静默丢弃
+4. 确认后创建: 单条 → create_weekly_report;多条 → batch_create_weekly_reports
+   （每条带各自 subject_id;缺省不提交,用户明确说「提交」才置提交）
 ```
 
-边界：本周无任务 → 如实说明，回退 W1 询问用户素材；任务与周时间段不匹配 → 列出可疑项让用户取舍，不要静默丢弃。
+**生成契约（四条必须全部满足）**：
+
+| # | 规则 |
+|---|------|
+| 1 | 进度数字、完成状态与材料一致，不得改写数值；事项名可以对材料任务名归纳合并，但不得改变其含义 |
+| 2 | 进行中任务不得以完成语气表述；已完成任务不得写成进行中 |
+| 3 | 材料信息不足（如任务无描述）时基于材料概括，仍不足则询问用户，不得编造 |
+| 4 | **默认不调 get_task_logs**（日志是变更流水，不是工作叙事）；用户点名参考日志/评论时，仅取评论类（action_type=4）内容补充素材 |
+
+**三点对齐（三个字段的唯一结构约束）**：
+
+| # | 规则 |
+|---|------|
+| 1 | 三个字段共用同一套编号，**第 n 点讲同一件事**：点数相同、顺序相同；缺对应或错位即不合格 |
+| 2 | 一级点收在 3–6 个：多于 6 个先合并同类项，少于 3 个回材料核对 |
+| 3 | `work_name` 第 n 点写 ≤16 字名词短语——「测评口径收敛」，不是「做了测评口径收敛的相关工作」 |
+| 4 | `work_content` 第 n 点 1–2 句、≤60 字：先说解决了什么问题，再说怎么做的 |
+| 5 | `work_result` 第 n 点 ≤40 字：放可核验的东西——数字、通过率、交付物、状态从 A 到 B |
+| 6 | 行首用 `1.` `2.` `3.` 起头，让收获方按行扫读；平台字段是纯文本，编号后直接接正文 |
+
+**写作形态（默认 A；按材料推荐、由用户定）**：
+
+| 形态 | 结构 | 适用 |
+|------|------|------|
+| **A 成果句（默认）** | 名称=事项短名；内容=做了什么+解决什么；成果=数字或交付物 | 通吃；建设型工作首选 |
+| B 一句话贡献 | 每点压成一行「完成 X，使 Y 从 A 到 B」，只留 3–4 点，其余并入「其他支撑工作」 | 只需快速汇报、不需留痕 |
+| C 主线+支线 | 第 1 点固定「本周主线」，其后 2–3 点为支撑工作 | 本周有明显单点重心 |
+| D 问题-动作-结果 | 每点=本周发现的问题 → 采取的动作 → 结果 | 测试排障型、要与开发对账 |
+
+推荐口径：材料以「发现问题—复测—记录」为主 → D；以「把方法或能力做出来」为主 → A；有一条明显主线 → C；用户说领导只看结论或时间紧 → B。**换形态要在预览前说明理由，用户点头再用**。
+
+**读者契约（写给领导看）**：
+
+| # | 规则 |
+|---|------|
+| 1 | 用业务语言写结果：文件路径、函数/类名、提交哈希、行数、参数名、内部阶段代号（L0 / L1a / D12 / SKIPPED）都不进周报，需要时换成「平台审批未走完导致误判为失败」这样的说法 |
+| 2 | 每点先给结果或判断，做法随后——按结论组织，不按时间顺序流水账 |
+| 3 | 每点收在可核验的事实上（数字、交付物、待办归属），不收在「持续跟进」 |
+| 4 | 技术名词首次出现时就地给一句白话 |
+
+**生成自检（全过才进预览）**：三字段点数相同且同号同序；一级点 3–6 个；任取一点 5 秒内能读懂做了什么、值多少；通篇无禁写标识；每点能指回一条真实来源任务；形态与材料性质相符，或已说明换形态的理由。
+
+**边界**：
+
+- 材料带 `hint`（工作周不可用）→ 如实告知并引导用户到 Web 端创建工作周——**与"本周无任务"是两种情况，不得混报**；
+- 材料 `counts.tasks=0` 且无 hint → 本周无任务，如实说明，回退 W1 询问用户素材；
+- 材料带 `warnings` 或 `source=local` → 素材走了降级路径（服务端工具不可用），向用户如实转述；
+- **素材命令自身失败** → 先按错误 hint 处置（重试/检查服务）；仍失败则向用户**声明降级**：改用 `tasks list --mine --all` 拉全量后按 `../_shared/domain-model.md` §3 口径人工核对时间窗与状态再进入第 2-4 步——降级必须在回复中说明，**不得静默写临时脚本绕过统一入口**；
+- 时间归属由素材命令代码保证，LLM 不做日期比对，无"可疑项取舍"环节。
 
 ## 5. 写操作完整预览
 
-任何写操作执行前按 `../_shared/write-preview.md` 生成全字段完整预览（模板 U：变更类「现状→执行后」对照；模板 C：创建类全字段含默认值）并经用户确认，执行后回读核验。规则、模板与各工具要点以该文件为唯一事实来源，此处不重复。
+任何写操作执行前按 `../_shared/write-preview.md` 生成全字段完整预览（模板 U：变更类「现状→执行后」对照；模板 C：创建类全字段含默认值；W2 生成路径的周报预览额外附溯源行）并经用户确认，执行后回读核验。规则、模板与各工具要点以该文件为唯一事实来源，此处不重复。
 
 batch_create：逐条完整预览（每条一个区块）→ 确认后调 → **单条失败不阻塞其余**，事后逐条报告。
 
-## 6. 查询子工作流 W3
+## 6. 查询子工作流 W3 与工作周发现
 
 ```bash
-# 我的周报 / 按维度查(参数以 inputSchema 为准)
+# 工作周发现(补写历史周先在此拿 work_week_id;参数以 inputSchema 为准)
+python cli.py call list_work_weeks --args '{"year": 2026}' --out _weeks.json
+
+# 我的周报 / 按维度查
 python cli.py call list_weekly_reports --args-file _args.json --out _reports.json
 # _args.json 示例: {"user_id": 39} 或 {"work_week_id": N} / {"subject_id": N} / {"is_submitted": 1}
 
-# 周报详情 / 更新
+# 周报详情 / 更新 / 删除(高危:物理删除不可恢复,预览要点见 ../_shared/write-preview.md 工具要点表)
 python cli.py call get_weekly_report_detail --args '{"report_id": N}'
 python cli.py call update_weekly_report --args-file _args.json
 # _args.json: {"id": N, ...要改的字段}
+python cli.py call delete_weekly_report --args '{"report_id": N}'
 ```
 
-`user_id`/`org_id` 从 `get_current_work_week` 的 identity 取；查他人周报需要用户提供其 ID。
+`user_id`/`org_id` 从 `get_current_work_week`（或素材命令输出）的 identity 取；查他人周报需要用户提供其 ID。
 
 ## 7. 调用约定
 
@@ -86,7 +141,7 @@ python cli.py call update_weekly_report --args-file _args.json
 
 ## 8. 输出渲染
 
-按 `../_shared/output-format.md`。周报列表用表格（ID/周/事项/提交状态）；W2 的逐条完整预览用表格区块展示；创建回执给 ID + is_submitted 状态。
+按 `../_shared/output-format.md`。周报列表用表格（ID/周/事项/提交状态）；W2 的溯源预览用逐条区块（全字段表格 + 来源任务行），首行标出采用的形态（A/B/C/D）与换形态理由，三个文本字段**逐行原样呈现分点**，不压成一段、不重排编号；创建回执给 ID + 提交状态。
 
 ## 9. 错误处理
 
@@ -94,7 +149,8 @@ python cli.py call update_weekly_report --args-file _args.json
 
 | 错误 | agent 动作 |
 |------|-----------|
-| `not_found`（无进行中工作周，`get_current_work_week` 返回 work_week=null） | 按 payload.hint 提示用户到 Web 端创建工作周 |
+| 素材命令返回 `hint`（工作周不可用，work_week=null） | 与"本周无任务"**区分提示**：引导用户到 Web 端创建工作周后重试 |
+| `not_found`（其余资源） | 让用户确认 ID；ID 来自本会话列表的优先复核 |
 | `identity_unavailable` | 提示身份信息获取失败；让用户直接提供 user_id/org_id 或稍后重试 |
 | `permission_denied`（weekly_report_* / work_week_view） | 提示联系管理员检查角色权限 |
 | `validation_error` | 重新读 inputSchema 核对参数后引导用户修正 |

@@ -67,3 +67,4 @@ python cli.py tools --out _tools.json
 2. **禁止**绕过 CLI（透传 `call`）直接手写 JSON-RPC / HTTP 请求
 3. **禁止**在未读取 inputSchema 的情况下"猜参数"重试 `validation_error`
 4. **禁止**把 `free-mode` 的透传当作绕过场景工作流（确认规则等）的捷径
+5. **去重纪律**：server description 已承载的语义（参数含义/枚举取值/默认值/危险提示）不在参考文件复述——技能侧只保留工作流步骤、确认政策与领域口径（领域口径唯一来源见 `domain-model.md`）

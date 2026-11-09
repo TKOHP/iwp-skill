@@ -61,6 +61,8 @@ python cli.py call get_weekly_report_detail --args '{"report_id": N}' --out _det
 - 用户提供的字段如实呈现；未提供的字段标注平台默认值或（空），每个字段都有一行
 - 完成判据：表格覆盖该工具 inputSchema 的全部字段，无留白省略
 
+**溯源行扩展（仅 W2 智能生成路径的周报创建预览）**：在全字段表格之后追加「来源任务」行——列出该条周报引用的材料任务（task_id/标题/状态/进度），以及材料中未被任何周报引用的任务的未采用说明（双向覆盖判据见 `../reports/README.md` W2）。溯源行是附加行，不改变模板 C 的完成判据；手动创建路径（W1）无溯源行。
+
 ## 5. 呈现与确认循环
 
 1. 按 `user-interaction.md` 呈现完整预览并收集用户确认
@@ -89,6 +91,6 @@ python cli.py call get_task_detail --args '{"task_id": N}' --out _verify.json
 | delete_task | U | 「执行后」整列标注「软删除，平台任务列表不可见」；平台侧恢复走 Web 端 |
 | assign_task | U | 覆盖式：「执行后」呈现完整新名单，被移除者显式标注（移除） |
 | add_task_log | C | 呈现新增日志全文；注明任务其他字段零改动 |
-| create_weekly_report / batch | C | is_submitted 默认 0（草稿）；batch 每条一个区块逐条呈现 |
+| create_weekly_report / batch | C | 缺省不提交，用户明确说「提交」才置提交；batch 每条一个区块逐条呈现；W2 生成路径附溯源行（见 §4） |
 | update_weekly_report / 提交 | U | 提交（is_submitted 0→1）只在用户明确说「提交」时出现在预览中 |
 | delete_weekly_report | U | 高危且不可恢复（物理删除）：「执行后」整列标注「删除后无法恢复」 |

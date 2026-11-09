@@ -103,6 +103,13 @@ HTTP_TIMEOUT_S = 30  # 单次请求超时
 MAX_RETRIES = 1  # 5xx 自动重试 1 次
 RETRY_BACKOFF_S = 0.2
 
+# === 任务状态渲染(呈现层翻译,非契约语义) ===
+# 口径对齐权威表: server update_task description 与后端任务状态
+# (0=待开始,1=进行中,2=已完成,3=已取消);业务含义见
+# references/_shared/domain-model.md。注意与课题状态枚举区分
+# (课题 3=暂停),两者不是同一枚举。
+TASK_STATUS_LABELS = {0: "待开始", 1: "进行中", 2: "已完成", 3: "已取消"}
+
 # === MCP 协议自适应(见 docs/技能内置MCP-client完整实现-方案设计.md) ===
 # client 支持的协议版本(降序,协商时取最高共同版本)
 SUPPORTED_PROTOCOL_VERSIONS = [
