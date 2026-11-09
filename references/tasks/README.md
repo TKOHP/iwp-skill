@@ -47,19 +47,20 @@ python cli.py call get_task_children --args '{"task_id": 132}'
 ```text
 1. 解析要素：课题（名称→ID）、标题、紧急度、起止日期、执行者
 2. 缺课题 → W4 课题发现；缺日期/紧急度用合理默认或询问用户
-3. 生成完整预览（见 §5），确认后把参数写入 JSON 文件（含中文必须走文件）:
+3a. 在回复正文呈现全字段预览表（模板见 `../_shared/write-preview.md` §4），并在同一条消息发起确认
+3b. 用户确认后，才把参数写入 JSON 文件（含中文必须走文件）并执行:
    python cli.py call create_task --args-file _args.json
    # _args.json: {"subject_id": 26, "title": "...", "description": "...",
    #              "urgency": "normal", "planned_start_date": "YYYY-MM-DD",
    #              "planned_end_date": "YYYY-MM-DD", "assignee_ids": [39]}
    # 参数以 cli.py tools 中 create_task 的 inputSchema 为准
-4. 回执：新建任务 ID + 关键字段
+4. 回读核验 + 回执：新建任务 ID + 关键字段
 ```
 
 ### W3 更新 / 删除 / 分配 / 写日志
 
 ```bash
-# 更新:  生成完整预览（见 §5）→ 确认后调 → 回读核验
+# 更新:  正文呈现完整预览（见 §5）→ 同一条消息确认 → 确认后调 → 回读核验
 python cli.py call update_task --args-file _args.json
 # _args.json: {"task_id": 132, "status": "completed"}
 # 可改字段远不止状态(标题/描述/紧急度/进度/日期/里程碑/换父等),全量以 inputSchema 为准
@@ -96,9 +97,9 @@ python cli.py call list_subjects --args '{"page": 1, "page_size": 100}' --out _s
 
 ## 5. 写操作完整预览
 
-任何写操作执行前按 `../_shared/write-preview.md` 生成全字段完整预览（模板 U：变更类「现状→执行后」对照；模板 C：创建类全字段含默认值）并经用户确认，执行后回读核验。规则、模板与各工具要点以该文件为唯一事实来源，此处不重复。
+任何写操作执行前，在回复正文呈现全字段完整预览（模板 U：变更类「现状→执行后」对照；模板 C：创建类全字段含默认值），同一条消息发起确认，确认后执行、执行后回读核验。规则、模板与各工具要点以 `../_shared/write-preview.md` 为唯一事实来源，此处不重复。
 
-批量修改（"把 X、Y、Z 都标完成"）：逐条完整预览 → 用户确认 → 逐条 update → 每条独立回执与核验。
+批量修改（"把 X、Y、Z 都标完成"）：条目 ≥3 时合并成一张表（每行一条，列＝全字段）→ 同一条消息确认 → 逐条 update → 每条独立回执与核验。
 
 ## 6. 输出渲染
 

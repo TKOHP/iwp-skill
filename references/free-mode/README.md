@@ -46,7 +46,7 @@ python cli.py tools --out _tools.json    # 加 --refresh 强制刷新 schema 缓
 | 工具性质 | 要求 |
 |------|---------|
 | 只读（list / get / statistics 类） | 可直接调用 |
-| 写性质（create / update / assign / delete / 批量） | 按 `../_shared/write-preview.md` 生成全字段完整预览并经用户确认后调，执行后回读核验 |
+| 写性质（create / update / assign / delete / 批量） | 在回复正文呈现全字段完整预览（模板见 `../_shared/write-preview.md`），同一条消息确认后调，执行后回读核验 |
 
 工具语义不明时，宁可先问用户确认读写性质，再决定是否走完整预览。
 
