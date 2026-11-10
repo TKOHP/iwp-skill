@@ -12,8 +12,6 @@
 保留(不变):
   - Bearer 注入 + 401 自动 refresh + 5xx 重试
   - JSON-RPC 错误码 → 异常翻译;工具 isError 处理
-
-规范依据:docs/技能内置MCP-client完整实现-方案设计.md §二/§五。
 """
 from __future__ import annotations
 

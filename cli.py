@@ -3,7 +3,7 @@
 薄透传内核 + 高频场景子命令。所有协议/业务逻辑委托 scripts/ 现有函数库,
 本文件只做:参数解析、命令编排、输出契约、退出码。
 
-输出契约(防 Windows 管道转码乱码,见 docs/cli-化改造-方案设计.md):
+输出契约(防 Windows 管道转码乱码):
   - stdout: 永远 ASCII-safe JSON(ensure_ascii=True),任何管道编码下无损
   - --out FILE: 以 UTF-8(ensure_ascii=False)写文件,保留中文可读,供
     agent 用读文件工具大段阅读

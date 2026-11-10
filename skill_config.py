@@ -110,7 +110,7 @@ RETRY_BACKOFF_S = 0.2
 # (课题 3=暂停),两者不是同一枚举。
 TASK_STATUS_LABELS = {0: "待开始", 1: "进行中", 2: "已完成", 3: "已取消"}
 
-# === MCP 协议自适应(见 docs/技能内置MCP-client完整实现-方案设计.md) ===
+# === MCP 协议自适应 ===
 # client 支持的协议版本(降序,协商时取最高共同版本)
 SUPPORTED_PROTOCOL_VERSIONS = [
     "2026-07-28",   # 无状态:无握手/无会话,_meta 携带元数据

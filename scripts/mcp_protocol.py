@@ -6,7 +6,6 @@
   - 无状态(2026-07-28):无握手,元数据进 _meta,必带 Mcp-Method / Mcp-Name 头
 
 本模块只放常量与纯函数(版本协商、SSE 解析);HTTP 与状态管理在 client.py。
-规范出处见 docs/技能内置MCP-client完整实现-方案设计.md §二。
 """
 from __future__ import annotations
 
