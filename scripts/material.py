@@ -16,7 +16,7 @@
   - 限流退避: 详情调用失败按 2s/4s 退避重试(nginx 503 窗口实测)。
 
 纯函数(in_week/select_tasks)可独立单测;build_material 的 fetch 参数
-注入,离线可测(tests/test_material.py),不依赖 MCP server 在线。
+注入,离线可测,不依赖 MCP server 在线。
 """
 from __future__ import annotations
 

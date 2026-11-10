@@ -2,6 +2,20 @@
 
 用户要求「更新 iwp 技能」时按本文件执行。SKILL.md 只做路由，具体步骤以本文件为准。
 
+## 自动检测（preflight 附带，只提示、不执行）
+
+`python scripts/preflight.py` 的输出可能多一个顶层 `update` 块：
+`{"checked":true,"available":true,"form":"git","remote_sha":"<40hex>","remote_date":"YYYY-MM-DD","action":"git_pull","prompt":true}`。
+
+- `prompt: true` = 本次提示（同一远端指纹 24h 内最多一次）；`available: true` = 本地确实落后上游
+- 提示只占回复**正文末尾**一行，文案二选一：
+  - `form: "cli"`：`检测到 iwp 技能有更新（<sha7>，<date>）。回复「更新 iwp 技能」即可更新，新会话生效。`
+  - `form: "git"`：`检测到上游有新提交（<sha7>，<date>）。当前是开发副本，请在技能目录执行 git pull，新会话生效。`
+- 静默是默认：无 `update` 块、`prompt` 非 true 或 `available: false` 时，回复保持原样
+- 探测失败（断网、限流、状态不可写）由脚本自身退避 24h，回复中同样保持静默
+- 关闭或改仓库：`.env` 设 `IWP_UPDATE_CHECK=0`；`IWP_UPDATE_REPO=owner/repo` 覆盖默认 `TKOHP/iwp-skill`
+- 单独诊断：`python scripts/update_check.py`（只读，不写状态、不改变提示闸门）
+
 ## Step 0：记录更新前基线
 
 任一形态的更新开始前，先记录以下两项，作为 Step 3 的唯一对照物：

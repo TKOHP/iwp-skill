@@ -2,7 +2,7 @@
 name: iwp
 description: IWP（创新工作平台）MCP 客户端：调用 IWP 后端课题任务与周报工具，OAuth 2.1 授权。触发词：列出我的任务、创建任务、课题任务、周报、提交周报、根据任务生成周报、MCP 工具。
 metadata:
-  version: "1.2.0"
+  version: "1.3.0"
 ---
 
 # iwp skill - 路由器入口
@@ -31,7 +31,7 @@ iwp skill 是 IWP（创新工作平台）MCP server 的标准 OAuth 2.1 PKCE 客
 
 任何路由、任何工具调用之前，按顺序完成两道检查：
 
-0. **事前检查**（会话首次调用前执行一次）：`python scripts/preflight.py` 确认依赖与 `.env` 配置就绪；有缺失时按 `references/_shared/setup-flow.md` 引导用户完成配置（检查分流、创建 `.env`、可达性探测的唯一事实来源）
+0. **事前检查**（会话首次调用前执行一次）：`python scripts/preflight.py` 确认依赖与 `.env` 配置就绪；有缺失时按 `references/_shared/setup-flow.md` 引导用户完成配置（检查分流、创建 `.env`、可达性探测的唯一事实来源）。输出含 `update` 块且 `prompt: true` 时，在回复正文末尾追加一行提示（文案与静默处理见 `references/_shared/update-flow.md`「自动检测」）
 1. **授权检查**：`python cli.py auth status` 返回 `authorized: true` 即有效。无效或缺失时，按 `references/_shared/auth-flow.md` 执行三方 OAuth 流程（**授权前必读**：授权流程、端口占用、超时与 state 校验的唯一事实来源，本文不重复其步骤）
 
 ## 调用约定
@@ -41,7 +41,7 @@ iwp skill 是 IWP（创新工作平台）MCP server 的标准 OAuth 2.1 PKCE 客
 - **透传**：`python cli.py call <工具名> --args '<JSON 对象>'`；参数含中文或复杂结构时改用 `--args-file <file.json>`（bash 内联 JSON 会被转码，禁止内联中文参数）
 - **高频场景**：`python cli.py tasks list --mine --all`（自动翻页 + 状态标签）；`python cli.py reports material --out <file>`（周报素材：代码筛选本周任务+补全字段+按课题分组，W2 的输入）；`python cli.py auth status|start|finish|invalidate|doctor`
 - **schema 优先**：调用示例仅示意，参数以 `python cli.py tools` 输出的 inputSchema 为准（工具事实来源仍是 MCP `tools/list`）→ `references/_shared/tool-discovery.md`
-- **输出契约**：stdout 永远是 ASCII-safe JSON（任何管道编码下无损不乱码）；需要中文可读的大段结果加 `--out file.json`（UTF-8 文件，用读文件工具查看）。成功 `{"ok":true,...}` 退出码 0；失败 `{"ok":false,"error":{kind,message,hint}}` 退出码 1；用法错误退出码 2
+- **输出契约**：stdout 永远是 ASCII-safe JSON（任何管道编码下无损不乱码）；需要中文可读的大段结果加 `--out file.json`（UTF-8 文件，用读文件工具查看）。成功 `{"ok":true,...}` 退出码 0；失败 `{"ok":false,"error":{kind,message,hint}}` 退出码 1；用法错误退出码 2。`preflight.py` 的顶层 `update` 块是附加字段，不参与 `ok` 判定、不改变退出码
 - 错误翻译 → `references/_shared/failure-modes.md`；输出渲染 → `references/_shared/output-format.md`；用户交互呈现（URL/预览/提问的内容位置与无 ask_user 兜底）→ `references/_shared/user-interaction.md`
 - 连接/协商诊断：`python cli.py selfcheck`
 - **写操作完整预览**：任何写操作（create / update / delete / assign / 写日志 / 周报创建与提交，含 free-mode 透传的写工具）执行前，先把全字段预览表写进本条回复正文（模板见 `references/_shared/write-preview.md`），再在同一条消息发起确认；用户确认前不得执行。执行后回读核验
@@ -51,4 +51,4 @@ iwp skill 是 IWP（创新工作平台）MCP server 的标准 OAuth 2.1 PKCE 客
 - `references/tasks/README.md` / `references/reports/README.md` / `references/free-mode/README.md` - 业务路由场景提示词；`references/_shared/update-flow.md` - update 路由工作流
 - `references/_shared/` - 授权工作流 / 工具发现（schema 优先+去重纪律）/ 错误码翻译 / 输出格式 / 用户交互呈现 / **领域口径权威表（domain-model.md）**
 - `cli.py` - 统一 CLI 入口（透传 call / tools / auth / tasks list / selfcheck；输出契约见 SKILL.md 调用约定）
-- `skill_config.py` + `scripts/`（auth / client / token_store / swagger_meta）- 纯基础设施（cli.py 的内部依赖,agent 不直接调用）
+- `skill_config.py` + `scripts/`（auth / client / token_store / swagger_meta / preflight / update_check）- 纯基础设施（cli.py 的内部依赖,agent 不直接调用）

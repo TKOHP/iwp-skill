@@ -138,6 +138,19 @@ def main() -> int:
     payload: dict[str, Any] = {"ok": ok, "checks": checks}
     if hints:
         payload["hints"] = hints
+    # 增量:技能自动更新检测。只在基础检查全过时探测(方案 §5.2 / R1):
+    # 缺依赖或缺 .env 时用户正在走 setup,不打扰、不发请求、不写状态。
+    # 尽力而为——任何异常都不影响上面的 ok/checks/hints 与退出码;
+    # 该块挂在 payload 而非 checks,保证 ok = all(checks) 的口径不变。
+    if ok:
+        try:
+            from scripts import update_check
+
+            update_payload = update_check.maybe_check()
+        except Exception:
+            update_payload = None
+        if isinstance(update_payload, dict):
+            payload["update"] = update_payload
     print(json.dumps(payload, ensure_ascii=True))
     return 0 if ok else 1
 
