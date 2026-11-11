@@ -5,16 +5,29 @@
 ## 自动检测（preflight 附带，只提示、不执行）
 
 `python scripts/preflight.py` 的输出可能多一个顶层 `update` 块：
-`{"checked":true,"available":true,"form":"git","remote_sha":"<40hex>","remote_date":"YYYY-MM-DD","action":"git_pull","prompt":true}`。
 
-- `prompt: true` = 本次提示（同一远端指纹 24h 内最多一次）；`available: true` = 本地确实落后上游
-- 提示只占回复**正文末尾**一行，文案二选一：
-  - `form: "cli"`：`检测到 iwp 技能有更新（<sha7>，<date>）。回复「更新 iwp 技能」即可更新，新会话生效。`
-  - `form: "git"`：`检测到上游有新提交（<sha7>，<date>）。当前是开发副本，请在技能目录执行 git pull，新会话生效。`
+```json
+{"checked":true,"available":true,"status":"behind","form":"git",
+ "remote_sha":"<40hex>","remote_date":"YYYY-MM-DD",
+ "detail":{"modified":2,"missing":0,"stale":1,"extra":0},
+ "action":"git_pull","prompt":true}
+```
+
+- `status` 表示本地发布集与远端的关系：
+  - `behind` 上游有新内容（正常更新场景）
+  - `drift` 上游未变、本地文件被改过（提示时说明「本地有改动」）
+  - `conflict` 双方都变（提示时说明「本地与上游都有改动」）
+  - `synced` 一致；`unknown` 无历史快照，只能判「不一致」
+- `available: true` = 本地与远端不一致（事实）；`prompt: true` = 本次要不要提示（同一 `<remote_sha>:<status>` 24h 内最多一次）
+- 提示只占回复**正文末尾**一行，按 `status` 与 `form` 选文案：
+  - `behind` + `form: "cli"`：`检测到 iwp 技能有更新（<sha7>，<date>）。回复「更新 iwp 技能」即可更新，新会话生效。`
+  - `behind` + `form: "git"`：`检测到上游有新提交（<sha7>，<date>）。当前是开发副本，请在技能目录执行 git pull，新会话生效。`
+  - `drift` / `conflict`：`本地 iwp 技能与上游不一致（<sha7>，<date>：<modified> 个文件不同）。回复「更新 iwp 技能」查看差异并确认覆盖。`
 - 静默是默认：无 `update` 块、`prompt` 非 true 或 `available: false` 时，回复保持原样
-- 探测失败（断网、限流、状态不可写）由脚本自身退避 24h，回复中同样保持静默
+- 提示不改变任何行为：**不得自动更新**；用户要求更新时按本文件 Step 0–3 执行，覆盖本地改动前必须先出完整预览
+- 探测失败（断网、限流、状态不可写）由脚本自身退避：网络错误 15 分钟后重试，配额耗尽按 `x-ratelimit-reset` 重试，回复中同样保持静默
 - 关闭或改仓库：`.env` 设 `IWP_UPDATE_CHECK=0`；`IWP_UPDATE_REPO=owner/repo` 覆盖默认 `TKOHP/iwp-skill`
-- 单独诊断：`python scripts/update_check.py`（只读，不写状态、不改变提示闸门）
+- 单独诊断：`python scripts/update_check.py`（只读，不写状态、不改变提示闸门，输出含 `diff` 每类前 10 条路径）
 
 ## Step 0：记录更新前基线
 
@@ -54,7 +67,7 @@ pwsh -File <技能目录>\scripts\update.ps1
 git -C <技能目录> pull
 ```
 
-gitignore 的状态文件不受影响。
+gitignore 的状态文件不受影响。若 preflight 的 `status` 是 `drift` 或 `conflict`（本地有改动），先 `git -C <技能目录> status --short` 把将被覆盖的文件列进预览，用户确认后再 pull；pull 失败（本地改动挡住快进）时不擅自 `reset --hard`，把冲突文件列给用户决定。
 
 ### 非 Windows 且 CLI 安装
 

@@ -105,14 +105,8 @@ def _probe() -> tuple[dict[str, Any], list[str]]:
         )
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description="iwp skill 事前检查")
-    parser.add_argument(
-        "--probe", action="store_true",
-        help="追加探测 MCP server 元数据端点(.env 写入后验证可达性)",
-    )
-    args = parser.parse_args()
-
+def build_payload(probe: bool = False) -> dict[str, Any]:
+    """组装检查结果(main 与测试共用同一口径,不打印)。"""
     checks: dict[str, Any] = {
         "python": {"ok": True, "version": platform.python_version()},
     }
@@ -126,9 +120,9 @@ def main() -> int:
     checks["env_present"] = env_present
     hints.extend(env_hints)
 
-    if args.probe:
-        probe, probe_hints = _probe()
-        checks["probe"] = probe
+    if probe:
+        probe_check, probe_hints = _probe()
+        checks["probe"] = probe_check
         hints.extend(probe_hints)
 
     ok = all(
@@ -138,7 +132,7 @@ def main() -> int:
     payload: dict[str, Any] = {"ok": ok, "checks": checks}
     if hints:
         payload["hints"] = hints
-    # 增量:技能自动更新检测。只在基础检查全过时探测(方案 §5.2 / R1):
+    # 增量:技能自动更新检测。只在基础检查全过时探测(方案 §4.11 / R13):
     # 缺依赖或缺 .env 时用户正在走 setup,不打扰、不发请求、不写状态。
     # 尽力而为——任何异常都不影响上面的 ok/checks/hints 与退出码;
     # 该块挂在 payload 而非 checks,保证 ok = all(checks) 的口径不变。
@@ -151,8 +145,20 @@ def main() -> int:
             update_payload = None
         if isinstance(update_payload, dict):
             payload["update"] = update_payload
+    return payload
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="iwp skill 事前检查")
+    parser.add_argument(
+        "--probe", action="store_true",
+        help="追加探测 MCP server 元数据端点(.env 写入后验证可达性)",
+    )
+    args = parser.parse_args()
+
+    payload = build_payload(probe=args.probe)
     print(json.dumps(payload, ensure_ascii=True))
-    return 0 if ok else 1
+    return 0 if payload["ok"] else 1
 
 
 if __name__ == "__main__":

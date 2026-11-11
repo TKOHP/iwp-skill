@@ -2,7 +2,7 @@
 name: iwp
 description: IWP（创新工作平台）MCP 客户端：调用 IWP 后端课题任务与周报工具，OAuth 2.1 授权。触发词：列出我的任务、创建任务、课题任务、周报、提交周报、根据任务生成周报、MCP 工具。
 metadata:
-  version: "1.3.0"
+  version: "1.4.0"
 ---
 
 # iwp skill - 路由器入口
@@ -31,7 +31,7 @@ iwp skill 是 IWP（创新工作平台）MCP server 的标准 OAuth 2.1 PKCE 客
 
 任何路由、任何工具调用之前，按顺序完成两道检查：
 
-0. **事前检查**（会话首次调用前执行一次）：`python scripts/preflight.py` 确认依赖与 `.env` 配置就绪；有缺失时按 `references/_shared/setup-flow.md` 引导用户完成配置（检查分流、创建 `.env`、可达性探测的唯一事实来源）。输出含 `update` 块且 `prompt: true` 时，在回复正文末尾追加一行提示（文案与静默处理见 `references/_shared/update-flow.md`「自动检测」）
+0. **事前检查**（会话首次调用前执行一次）：`python scripts/preflight.py` 确认依赖与 `.env` 配置就绪；有缺失时按 `references/_shared/setup-flow.md` 引导用户完成配置（检查分流、创建 `.env`、可达性探测的唯一事实来源）。输出含 `update` 块且 `prompt: true` 时，在回复正文末尾追加一行提示：`status` 为 `behind`（上游更新）/ `drift`（本地被改过）/ `conflict`（双方都变）三种都提示，文案与静默处理见 `references/_shared/update-flow.md`「自动检测」；提示只告知，不自动更新，用户要求更新时按 update 路由先出完整预览
 1. **授权检查**：`python cli.py auth status` 返回 `authorized: true` 即有效。无效或缺失时，按 `references/_shared/auth-flow.md` 执行三方 OAuth 流程（**授权前必读**：授权流程、端口占用、超时与 state 校验的唯一事实来源，本文不重复其步骤）
 
 ## 调用约定

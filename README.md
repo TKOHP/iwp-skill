@@ -30,7 +30,7 @@ CLI 会自动检测本机已安装的 agent（Claude Code / Cursor / Codex / Gem
 
 - 自动识别安装形态并无损更新：`.env` 与授权凭证自动备份、恢复、核验，不会丢失
 - 更新在**新会话**生效；当前版本见 `SKILL.md` 的 `metadata.version`
-- **自动提醒**：会话首次调用前会顺带检查上游（每天最多一次、超时 2.5s 静默放弃），确有新版本时在回复末尾提醒一句；不会自动更新，也不会弹问题打断你。关闭：`.env` 设 `IWP_UPDATE_CHECK=0`
+- **自动提醒**：会话首次调用前会顺带检查上游（每天最多一次、整轮探测硬预算 5s、失败静默退避），确有差异时在回复末尾提醒一句——能区分「上游有更新」「本地被改过」「两边都变」；不会自动更新，也不会弹问题打断你。关闭：`.env` 设 `IWP_UPDATE_CHECK=0`
 
 ## 使用案例
 
@@ -76,6 +76,7 @@ CLI 会自动检测本机已安装的 agent（Claude Code / Cursor / Codex / Gem
 
 当前版本以 `SKILL.md` frontmatter 的 `metadata.version` 为准（单一事实来源），此处仅追加历史条目。
 
+- v1.4.0（2026-11-11）：更新检测改用**发布集指纹 PSF**——远端一次 Tree API 取「路径 → blob sha」清单，本地用 `git hash-object`（应用 clean filter，消除行尾差异）或按字节复算，逐路径比对得出 `synced` / `behind` / `drift` / `conflict` / `unknown`，取代原先「lock 的 skillFolderHash 等值于远端 commit sha」的判等（该口径在 npx 安装与 zip 覆盖场景会周期性误报）；提示闸门按 `<remote_sha>:<status>` 计 24h，失败退避区分网络抖动（15 分钟）与匿名配额耗尽（按 `x-ratelimit-reset`）；`update` 块新增 `status`/`detail`；`.env.example` 的 MCP 地址改为 `https://<iwp-host>` 占位符。
 - v1.3.0（2026-11-09）：技能自动更新检测——`scripts/preflight.py` 在会话首次调用时顺带检查上游（`scripts/update_check.py`，纯标准库、匿名单请求、硬预算 2.5s、24h 门禁与失败退避），确有更新时在回复末尾提示一句并给出现成动作（CLI 安装走更新路由、开发副本提示 `git pull`）；只提示不自动更新，`IWP_UPDATE_CHECK=0` 可关；`preflight` 旧契约（`ok`/`checks`/`hints`/退出码）不变，仅追加顶层 `update` 块。
 - v1.2.0（2026-09-24）：回声授权（Echo Auth）——授权推进以回调到达为准，无需用户口头确认；`auth finish` 改为单查状态契约（`waiting`/`completed`/`callback_dead`）并新增 `--wait` 长轮询；`auth start` 自动打开浏览器（`IWP_AUTO_OPEN` 可关，失败静默降级）；回调服务过期主动引导重新授权；新增 `auth doctor` 聚合体检；删除死常量并修正错误注释。
 - v1.1.1（2026-09-23）：修复更新工作流的误导性信号——`update.ps1` 状态清单精确枚举且输出带文件名；`auth status` 新增 `reason` 字段（`not_configured` / `expired_or_invalid`）；`update-flow.md` 新增 Step 0 更新前基线与 Step 3 双分支核验；移除用户安装中不存在的 `.env.local` / `.env.server` 模板引用与 dev 测试文件。
