@@ -355,8 +355,8 @@ def update_block(form: str, remote: dict[str, Any], status: str,
 # === 远端探测（匿名、两次请求、硬预算）===
 API_COMMIT_FMT = "https://api.github.com/repos/{repo}/commits/main"
 API_TREE_FMT = "https://api.github.com/repos/{repo}/git/trees/{sha}?recursive=1"
-HTTP_TIMEOUT_S = 3.0        # urllib 单次请求超时（实测 0.8–2.8s，偶发 >2.5s 握手抖动）
-PROBE_BUDGET_S = 4.0        # 整个探测（commit + tree）的硬截止（实测 1.8–2.9s，含一次重试）
+HTTP_TIMEOUT_S = 15.0       # urllib 单次请求超时（实测 1.9–9.7s，跨境链路波动极大）
+PROBE_BUDGET_S = 30.0       # 整个探测（commit + tree）的硬截止，超出即静默放弃
 MAX_RESPONSE_BYTES = 256 * 1024
 TREE_MAX_BYTES = 1024 * 1024
 _USER_AGENT = "iwp-skill-update-check/2"
