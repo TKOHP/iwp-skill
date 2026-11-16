@@ -2,14 +2,24 @@
 
 定位：维护面能力，不参与业务链路。纯标准库、尽力而为——任何异常都不向
 调用方抛出，不改变 preflight 的 ok 判定与退出码；每天最多发起一次匿名
-GitHub 请求，失败后 24 小时内不重试。
+GitHub 请求，失败后按退避窗口重试。
 
-判定基准：发布集指纹 PSF（Publish-Set Fingerprint）
-    远端：Tree API 列出技能目录下所有被 git 跟踪的 blob（路径 -> blob sha）
-    本地：git 形态用 `git hash-object`（应用 clean filter，消除行尾差异）；
-          普通目录形态按 `sha1("blob <字节数>\\0" + 内容)` 复算
-    逐路径比对得出 synced / behind / drift / conflict / unknown；
-    PSF 只作为状态指纹记录，不参与跨实现比较。
+判定基准（方案 §3.2 / §3.3：三形态探测，见 docs 存档）
+    形态 git      目录含 .git 且 origin 归一后等于目标仓库
+         npx      `npx --no-install skills list -g --json` 中存在 path 等于本目录、
+                  sourceUrl 等于目标仓库、status 为 tracked 的记录
+         bare     以上都不成立（解压安装、手工拷贝，两者无需区分）
+         git_foreign 含 .git 但 origin 不等于目标仓库（分叉/开发副本），不自动更新
+
+    本地版本标识按形态取：
+         git   `git rev-parse HEAD`
+         npx   锁记录的 skillFolderHash
+         bare  没有提交身份，只能逐文件对账（发布集指纹 PSF 的唯一使用方）
+
+    状态语义：
+         git   HEAD 与远端 sha 比；工作树脏 -> drift，双变 -> conflict
+         npx   锁 sha 与远端 sha 比；本地改动无法判定，只产出 synced/behind
+         bare  发布集逐路径对账，四态齐全
 """
 from __future__ import annotations
 
@@ -31,7 +41,15 @@ import skill_config  # noqa: E402
 SKILL_DIR: Path = skill_config.SKILL_DIR
 STATE_FILE: Path = SKILL_DIR / ".update_state.json"
 LOCK_FILE: Path = Path.home() / ".agents" / ".skill-lock.json"
+GITIGNORE_FILE: Path = SKILL_DIR / ".gitignore"
 DEFAULT_REPO = "TKOHP/iwp-skill"
+
+# === 安装形态 ===
+FORM_GIT = "git"
+FORM_NPX = "npx"
+FORM_BARE = "bare"
+FORM_FOREIGN = "git_foreign"
+FORMS = (FORM_GIT, FORM_NPX, FORM_BARE, FORM_FOREIGN)
 
 # === 输入校验（拒绝拼进 URL / 命令的任意值）===
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -45,10 +63,10 @@ FAIL_RETRY_S = 900              # 探测失败后的重试间隔（网络抖动�
 RATE_LIMIT_RETRY_S = 3600       # 匿名配额耗尽（403/429）时的兜底重试间隔
 
 # === 状态文件契约 ===
-STATE_SCHEMA = 2
+STATE_SCHEMA = 3
 STATE_KEYS = (
     "schema", "repo", "last_check_at", "last_result", "last_error",
-    "remote_sha", "remote_date", "psf", "manifest",
+    "remote_sha", "remote_date", "snapshot",
     "last_notified_key", "last_notified_at", "retry_at",
 )
 
@@ -56,9 +74,15 @@ STATE_KEYS = (
 MAX_MANIFEST_PATHS = 2000        # 超过只记 psf，不再记逐路径清单
 MAX_MANIFEST_BYTES = 512 * 1024  # 清单 JSON 体积上限
 MAX_FILE_BYTES = 4 * 1024 * 1024  # 单文件超过即视为运行产物，不进发布集
+MAX_DIRTY_PATHS = 200            # git 形态工作树脏文件列表上限
 
 _OFF_VALUES = {"", "0", "false", "no", "off"}
 _STATES = ("synced", "behind", "drift", "conflict", "unknown")
+
+# npx 归属探测：--no-install 保证只读本地缓存、不触发下载。
+# 该命令为固定常量，不接受外部拼接，故使用 shell 解析 PATHEXT（npx.cmd）。
+NPX_LIST_CMD = "npx --no-install skills list -g --json"
+NPX_TIMEOUT_S = 20.0
 
 
 def enabled() -> bool:
@@ -304,6 +328,26 @@ def classify(remote: dict[str, str], local: dict[str, str] | None,
     return {"status": status, "detail": detail}
 
 
+def compare_snapshot(local: dict[str, str] | None,
+                     expected: dict[str, str]) -> dict[str, Any] | None:
+    """同源快照比对（远端未变时的快捷判定）：任意差异都只能来自本地改动。
+
+    local 读不到返回 None；一致 -> synced，否则 -> drift。
+    """
+    if local is None:
+        return None
+    detail: dict[str, list[str]] = {"modified": [], "missing": [], "stale": [], "extra": []}
+    for path, sha in expected.items():
+        have = local.get(path)
+        if have is None:
+            detail["missing"].append(path)
+        elif have != sha:
+            detail["modified"].append(path)
+    detail["extra"] = sorted(p for p in local if p not in expected)
+    changed = any(detail[kind] for kind in ("modified", "missing", "extra"))
+    return {"status": "drift" if changed else "synced", "detail": detail}
+
+
 def storable_manifest(manifest: dict[str, str]) -> dict[str, str] | None:
     """超上限只记 psf（方案 §4.7 R12）；返回 None 表示不写逐路径清单。"""
     if len(manifest) > MAX_MANIFEST_PATHS:
@@ -330,8 +374,8 @@ def prompt_allowed(now: float, state: dict[str, Any], key: str) -> bool:
 
 
 def action_for(form: str) -> str:
-    """给 agent 的动作标签：git 形态走 git pull，其余走 update 路由。"""
-    return "git_pull" if form == "git" else "update_route"
+    """给 agent 的动作标签：执行路径由执行器按形态自行分派，统一为 update。"""
+    return "update"
 
 
 def update_block(form: str, remote: dict[str, Any], status: str,
@@ -352,14 +396,14 @@ def update_block(form: str, remote: dict[str, Any], status: str,
         block["detail"] = {kind: len(paths) for kind, paths in detail.items()}
     return block
 
-# === 远端探测（匿名、两次请求、硬预算）===
+# === 远端探测（匿名、硬预算）===
 API_COMMIT_FMT = "https://api.github.com/repos/{repo}/commits/main"
 API_TREE_FMT = "https://api.github.com/repos/{repo}/git/trees/{sha}?recursive=1"
 HTTP_TIMEOUT_S = 15.0       # urllib 单次请求超时（实测 1.9–9.7s，跨境链路波动极大）
-PROBE_BUDGET_S = 30.0       # 整个探测（commit + tree）的硬截止，超出即静默放弃
+PROBE_BUDGET_S = 30.0       # 单次远端探测的硬截止，超出即静默放弃
 MAX_RESPONSE_BYTES = 256 * 1024
 TREE_MAX_BYTES = 1024 * 1024
-_USER_AGENT = "iwp-skill-update-check/2"
+_USER_AGENT = "iwp-skill-update-check/3"
 
 
 class RateLimited(Exception):
@@ -426,43 +470,23 @@ def _fetch_with_retry(fetch: Any, url: str, max_bytes: int | None = None,
     raise last if last is not None else RuntimeError("fetch failed")
 
 
-def fetch_remote_manifest(repo: str, *, budget_s: float = PROBE_BUDGET_S,
-                          fetch: Any = None,
-                          hint: dict[str, Any] | None = None) -> dict[str, Any] | None:
-    """取远端发布集；任何失败/超预算返回 None（静默）。
-
-    hint 若传入，配额耗尽时会写入 {"retry_at": <epoch>}，调用方据此退避。
-    """
+def _run_with_budget(work: Any, budget_s: float,
+                     hint: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    """在守护线程里跑远端探测，超预算即放弃；返回结果字典或 None。"""
     import threading
 
-    if not valid_repo(repo):
-        return None
-    fetch = fetch or _http_get_json
     box: dict[str, Any] = {}
 
-    def _work() -> None:
+    def _wrapped() -> None:
         try:
-            commit = parse_remote(
-                _fetch_with_retry(fetch, API_COMMIT_FMT.format(repo=repo))
-            )
-            if commit is None:
-                box["failed"] = True
-                return
-            tree = parse_tree(_fetch_with_retry(
-                fetch, API_TREE_FMT.format(repo=repo, sha=commit["sha"]),
-                TREE_MAX_BYTES,
-            ))
-            if tree is None:
-                box["failed"] = True
-                return
-            box["ok"] = {**commit, **tree}
+            box["ok"] = work()
         except RateLimited as exc:
             box["failed"] = True
             box["retry_at"] = exc.retry_at
-        except Exception:
+        except Exception:  # noqa: BLE001 - 探测失败一律静默
             box["failed"] = True
 
-    worker = threading.Thread(target=_work, name="iwp-update-probe", daemon=True)
+    worker = threading.Thread(target=_wrapped, name="iwp-update-probe", daemon=True)
     worker.start()
     worker.join(budget_s)
     if hint is not None and isinstance(box.get("retry_at"), (int, float)):
@@ -471,7 +495,62 @@ def fetch_remote_manifest(repo: str, *, budget_s: float = PROBE_BUDGET_S,
         return None
     return box.get("ok")
 
-# === 本地发布集（git hash-object / 原始字节复算）===
+
+def fetch_commit(repo: str, *, budget_s: float = PROBE_BUDGET_S,
+                 fetch: Any = None,
+                 hint: dict[str, Any] | None = None) -> dict[str, str] | None:
+    """取远端 main 的 commit 身份；失败/超预算返回 None（静默）。"""
+    if not valid_repo(repo):
+        return None
+    fetch = fetch or _http_get_json
+
+    def _work() -> dict[str, str] | None:
+        return parse_remote(_fetch_with_retry(fetch, API_COMMIT_FMT.format(repo=repo)))
+
+    return _run_with_budget(_work, budget_s, hint)
+
+
+def fetch_tree(repo: str, sha: str, *, budget_s: float = PROBE_BUDGET_S,
+               fetch: Any = None,
+               hint: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    """取远端发布集（仅 bare 形态需要）；失败/超预算返回 None（静默）。"""
+    if not valid_repo(repo) or not valid_sha(sha):
+        return None
+    fetch = fetch or _http_get_json
+
+    def _work() -> dict[str, Any] | None:
+        return parse_tree(_fetch_with_retry(
+            fetch, API_TREE_FMT.format(repo=repo, sha=sha), TREE_MAX_BYTES,
+        ))
+
+    return _run_with_budget(_work, budget_s, hint)
+
+
+def fetch_remote_manifest(repo: str, *, budget_s: float = PROBE_BUDGET_S,
+                          fetch: Any = None,
+                          hint: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    """commit + tree 一次取全（执行器需要发布集时使用）。"""
+    if not valid_repo(repo):
+        return None
+    fetch = fetch or _http_get_json
+
+    def _work() -> dict[str, Any] | None:
+        commit = parse_remote(
+            _fetch_with_retry(fetch, API_COMMIT_FMT.format(repo=repo))
+        )
+        if commit is None:
+            return None
+        tree = parse_tree(_fetch_with_retry(
+            fetch, API_TREE_FMT.format(repo=repo, sha=commit["sha"]),
+            TREE_MAX_BYTES,
+        ))
+        if tree is None:
+            return None
+        return {**commit, **tree}
+
+    return _run_with_budget(_work, budget_s, hint)
+
+# === 本地发布集（原始字节复算）===
 GIT_TIMEOUT_S = 2.0
 
 
@@ -490,42 +569,23 @@ def _run_git(args: list[str], *, cwd: Path, timeout: float = GIT_TIMEOUT_S,
         )
     except (OSError, subprocess.SubprocessError):
         return -1, ""
-    return proc.returncode, proc.stdout.decode("utf-8", "replace").strip()
+    # 只去行尾换行：porcelain 输出首行以「空格 + 状态位」开头，整体 strip()
+    # 会吃掉那个空格，导致脏文件路径少一个字符
+    return proc.returncode, proc.stdout.decode("utf-8", "replace").strip("\r\n")
 
 
-def _git_manifest(paths: list[str], skill_dir: Path, run: Any) -> dict[str, str] | None:
-    """`git hash-object --stdin-paths` 批量取 blob sha（自动应用 clean filter）。"""
-    if any("\n" in p for p in paths):
-        return None
-    present = [p for p in paths if (skill_dir / p).is_file()]
-    out: dict[str, str] = {}
-    for start in range(0, len(present), 200):
-        part = present[start:start + 200]
-        rc, text = run(["hash-object", "--stdin-paths"], cwd=skill_dir,
-                       stdin_data="\n".join(part) + "\n")
-        if rc != 0:
-            return None
-        lines = [line.strip() for line in text.splitlines() if line.strip()]
-        if len(lines) != len(part):
-            return None
-        for path, sha in zip(part, lines):
-            if not valid_sha(sha):
-                return None
-            out[path] = sha
-    return out
-
-
-def _raw_manifest(paths: list[str], skill_dir: Path,
-                 expect: dict[str, str] | None = None) -> dict[str, str] | None:
+def local_manifest(paths: list[str], *, skill_dir: Path | None = None,
+                   expect: dict[str, str] | None = None) -> dict[str, str] | None:
     """普通目录：直接读字节复算 blob sha；任一文件不可读则整体无证据。
 
     Windows 检出的副本行尾为 CRLF，而仓库里存的是 LF；原始字节不等且
     期望值存在时，再按 CRLF->LF 归一复算一次（只影响文本，二进制无 CRLF
     不受影响），避免整包假差异。
     """
+    d = SKILL_DIR if skill_dir is None else skill_dir
     out: dict[str, str] = {}
     for path in paths:
-        target = skill_dir / path
+        target = d / path
         try:
             if not target.is_file():
                 continue
@@ -538,25 +598,6 @@ def _raw_manifest(paths: list[str], skill_dir: Path,
             digest = blob_sha(data.replace(b"\r\n", b"\n"))
         out[path] = digest
     return out
-
-
-def detect_form(skill_dir: Path | None = None) -> str:
-    d = SKILL_DIR if skill_dir is None else skill_dir
-    try:
-        inside_git = (d / ".git").exists()
-    except OSError:
-        inside_git = False
-    return "git" if inside_git else "cli"
-
-
-def local_manifest(paths: list[str], *, skill_dir: Path | None = None,
-                   form: str | None = None, run: Any = None,
-                   expect: dict[str, str] | None = None) -> dict[str, str] | None:
-    d = SKILL_DIR if skill_dir is None else skill_dir
-    kind = detect_form(d) if form is None else form
-    if kind == "git":
-        return _git_manifest(paths, d, run or _run_git)
-    return _raw_manifest(paths, d, expect)
 
 
 def parse_github_repo(url: Any) -> str | None:
@@ -584,38 +625,206 @@ def parse_github_repo(url: Any) -> str | None:
     return repo if valid_repo(repo) else None
 
 
-def _git_identity(repo: str, skill_dir: Path, run: Any) -> bool | None:
-    """origin 与目标仓库一致才算适用；不一致返回 False（静默且退避）。"""
-    rc, origin = run(["remote", "get-url", "origin"], cwd=skill_dir)
-    if rc != 0:
+def normalize_path(value: Any) -> str | None:
+    """Windows 路径归一：分隔符统一为 \\\\、去尾部、大小写不敏感。"""
+    if not isinstance(value, str) or not value.strip():
         return None
-    return parse_github_repo(origin) == repo
+    text = value.strip().replace("/", "\\")
+    while len(text) > 3 and text.endswith("\\"):
+        text = text[:-1]
+    return text.casefold()
 
 
-def _lock_identity(repo: str, lock_path: Path) -> bool | None:
-    """lock 记录 GitHub 来源且仓库一致才算适用；无 lock 或非 GitHub 返回 None。"""
+def _lock_entry(lock_path: Path | None = None) -> dict[str, Any] | None:
+    """读锁文件中 iwp 条目；锁不存在/损坏/无该条目一律返回 None。"""
+    p = LOCK_FILE if lock_path is None else lock_path
     try:
-        data = json.loads(lock_path.read_text(encoding="utf-8"))
+        data = json.loads(p.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
     if not isinstance(data, dict):
         return None
     skills = data.get("skills")
     entry = skills.get("iwp") if isinstance(skills, dict) else None
-    if not isinstance(entry, dict) or entry.get("sourceType") != "github":
-        return None
-    locked = parse_github_repo(entry.get("sourceUrl")) or entry.get("source")
-    if locked is None:
-        return None
-    return locked == repo
+    return entry if isinstance(entry, dict) else None
 
 
-def identity(form: str, repo: str, *, skill_dir: Path | None = None,
-             lock_path: Path | None = None, run: Any = None) -> bool | None:
+def git_dirty_paths(skill_dir: Path | None = None,
+                    run: Any = None) -> list[str] | None:
+    """工作树脏文件（忽略未跟踪文件，状态文件不计入改动）；读不到返回 None。"""
     d = SKILL_DIR if skill_dir is None else skill_dir
-    if form == "git":
-        return _git_identity(repo, d, run or _run_git)
-    return _lock_identity(repo, lock_path or LOCK_FILE)
+    runner = run or _run_git
+    rc, out = runner(["status", "--porcelain", "--untracked-files=no"], cwd=d)
+    if rc != 0:
+        return None
+    paths: list[str] = []
+    for line in out.splitlines():
+        if not line.strip():
+            continue
+        path = line[3:] if len(line) > 3 else line
+        if " -> " in path:            # 重命名：取新路径
+            path = path.split(" -> ", 1)[1]
+        path = path.strip().strip('"')
+        if path:
+            paths.append(path)
+        if len(paths) >= MAX_DIRTY_PATHS:
+            break
+    return paths
+
+
+def _list_npx_skills(timeout: float = NPX_TIMEOUT_S) -> list[dict[str, Any]] | None:
+    """`skills list -g --json`（离线、只读）；Node 缺失或命令失败返回 None。"""
+    import shutil
+    import subprocess
+
+    if shutil.which("npx") is None:
+        return None
+    try:
+        proc = subprocess.run(
+            NPX_LIST_CMD, shell=True, capture_output=True,
+            timeout=timeout, check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0:
+        return None
+    try:
+        data = json.loads(proc.stdout.decode("utf-8", "replace"))
+    except ValueError:
+        return None
+    if not isinstance(data, list):
+        return None
+    return [item for item in data if isinstance(item, dict)]
+
+
+def match_npx_entry(entries: list[dict[str, Any]], skill_dir: Path,
+                    repo: str) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
+    """在 list 结果里找「本目录」的记录，同时返回「同仓库的其他副本」。
+
+    归属只认 path 相等，其次校验 sourceUrl；锁文件本身不作为归属证据。
+    """
+    target = normalize_path(str(skill_dir))
+    hit: dict[str, Any] | None = None
+    others: list[dict[str, Any]] = []
+    for entry in entries:
+        path = entry.get("path")
+        source = (parse_github_repo(entry.get("sourceUrl"))
+                  or parse_github_repo(entry.get("source")))
+        if normalize_path(path) == target:
+            hit = {**entry, "_repo": source}
+        elif source == repo:
+            others.append({
+                "path": path,
+                "status": entry.get("status"),
+                "scope": entry.get("scope"),
+            })
+    return hit, others
+
+
+def detect_profile(skill_dir: Path | None = None, *, repo: str | None = None,
+                   run: Any = None, list_skills: Any = None) -> dict[str, Any]:
+    """判定安装形态，返回 {"form", "reason", "evidence"}。
+
+    顺序固定：git -> git_foreign -> npx -> bare，命中即停；npx 必须有正面证据
+    （path + sourceUrl + tracked），不以「没有 .git」反推「是 npx」。
+    """
+    d = SKILL_DIR if skill_dir is None else skill_dir
+    target_repo = repo_slug() if repo is None else repo
+    runner = run or _run_git
+    evidence: dict[str, Any] = {"skill_dir": str(d), "repo": target_repo}
+
+    try:
+        has_git = (d / ".git").exists()
+    except OSError:
+        has_git = False
+
+    if has_git:
+        rc, origin = runner(["remote", "get-url", "origin"], cwd=d)
+        parsed = parse_github_repo(origin) if rc == 0 else None
+        evidence["origin"] = origin if rc == 0 else None
+        if parsed == target_repo:
+            return {"form": FORM_GIT, "reason": "git_origin_match", "evidence": evidence}
+        return {
+            "form": FORM_FOREIGN,
+            "reason": "git_origin_mismatch" if parsed else "git_origin_unreadable",
+            "evidence": evidence,
+        }
+
+    entries = (list_skills or _list_npx_skills)()
+    if entries is None:
+        evidence["npx_list"] = "unavailable"
+        return {"form": FORM_BARE, "reason": "npx_list_failed", "evidence": evidence}
+
+    hit, others = match_npx_entry(entries, d, target_repo)
+    evidence["npx_listed"] = len(entries)
+    if others:
+        evidence["other_copies"] = others
+    if hit is None:
+        return {"form": FORM_BARE, "reason": "npx_no_path_match", "evidence": evidence}
+    evidence["npx_status"] = hit.get("status")
+    evidence["npx_source"] = hit.get("sourceUrl") or hit.get("source")
+    if hit.get("_repo") != target_repo:
+        return {"form": FORM_BARE, "reason": "npx_source_mismatch", "evidence": evidence}
+    if hit.get("status") != "tracked":
+        return {"form": FORM_BARE, "reason": "npx_lock_untracked", "evidence": evidence}
+    return {"form": FORM_NPX, "reason": "npx_path_match", "evidence": evidence}
+
+
+def local_commit_id(form: str, *, skill_dir: Path | None = None,
+                    lock_path: Path | None = None, run: Any = None) -> str | None:
+    """本地版本标识：git 取 HEAD，npx 取锁的 skillFolderHash，其余无。"""
+    if form == FORM_GIT:
+        d = SKILL_DIR if skill_dir is None else skill_dir
+        rc, out = (run or _run_git)(["rev-parse", "HEAD"], cwd=d)
+        return out if rc == 0 and valid_sha(out) else None
+    if form == FORM_NPX:
+        entry = _lock_entry(lock_path)
+        value = entry.get("skillFolderHash") if entry else None
+        return value.lower() if valid_sha(value) else None
+    return None
+
+
+def keepalive_names(gitignore: Path | None = None) -> list[str] | None:
+    """从 .gitignore 派生保活集合（唯一来源，见方案 §3.6 / R8）。
+
+    规则：取不含通配符（* ? [）且不以 / 结尾的条目——即「不进版本库、也不进
+    发布包」的根级文件。读不到 .gitignore 返回 None（调用方据此拒绝覆盖式更新）。
+    """
+    p = GITIGNORE_FILE if gitignore is None else gitignore
+    try:
+        lines = p.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None
+    out: list[str] = []
+    for raw in lines:
+        line = raw.strip()
+        if not line or line.startswith("#") or line.startswith("!"):
+            continue
+        if line.endswith("/"):
+            continue
+        if any(ch in line for ch in "*?["):
+            continue
+        if "/" in line or "\\" in line:
+            continue
+        if line not in out:
+            out.append(line)
+    return out
+
+
+def _snapshot_for(state: dict[str, Any], sha: str) -> dict[str, Any] | None:
+    """同源快照：sha 相同且含逐路径清单才可用于快捷判定（方案 R5）。"""
+    snap = state.get("snapshot")
+    if not isinstance(snap, dict):
+        return None
+    if not valid_sha(snap.get("sha")) or snap.get("sha") != sha:
+        return None
+    manifest = snap.get("manifest")
+    if not isinstance(manifest, dict) or not manifest:
+        return None
+    if any(not valid_sha(v) for v in manifest.values()):
+        return None
+    return snap
+
 
 # === 编排（唯一对外入口；永不抛异常）===
 
@@ -628,6 +837,17 @@ def maybe_check(*, now: float | None = None,
         return None
 
 
+def _probe_failed(state: dict[str, Any], moment: float, error: str,
+                  retry_at: float | None = None) -> None:
+    write_state({
+        **state,
+        "last_check_at": moment,
+        "last_result": "error",
+        "last_error": error,
+        "retry_at": retry_at if retry_at is not None else moment + FAIL_RETRY_S,
+    })
+
+
 def _maybe_check(*, now: float | None, write: bool) -> dict[str, Any] | None:
     if not enabled():
         return None
@@ -638,57 +858,90 @@ def _maybe_check(*, now: float | None, write: bool) -> dict[str, Any] | None:
     if not state_writable():
         return None
     repo = repo_slug()
-    form = detect_form()
-    usable = identity(form, repo)
-    if usable is None:
+    profile = detect_profile(repo=repo)
+    form = profile["form"]
+    if form == FORM_FOREIGN:
         if write:
-            write_state({**state, "last_check_at": moment,
-                         "last_result": "no_evidence", "last_error": "no_identity",
-                         "retry_at": moment + FAIL_RETRY_S})
-        return None
-    if usable is False:
-        if write:
-            write_state({**state, "last_check_at": moment,
-                         "last_result": "error", "last_error": "repo_mismatch",
-                         "retry_at": moment + FAIL_RETRY_S})
+            _probe_failed(state, moment, profile["reason"])
         return None
     hint: dict[str, Any] = {}
-    remote = fetch_remote_manifest(repo, hint=hint)
-    if remote is None:
-        retry_at = hint.get("retry_at") or moment + FAIL_RETRY_S
+    commit = fetch_commit(repo, hint=hint)
+    if commit is None:
         if write:
-            write_state({**state, "last_check_at": moment,
-                         "last_result": "error", "last_error": "probe_failed",
-                         "retry_at": retry_at})
+            _probe_failed(state, moment, "probe_failed", hint.get("retry_at"))
         return None
-    local = local_manifest(list(remote["manifest"]), form=form,
-                           expect=remote["manifest"])
-    verdict = classify(remote["manifest"], local, state.get("manifest"))
-    status = "no_evidence" if verdict is None else verdict["status"]
+
+    verdict: dict[str, Any] | None = None
+    manifest: dict[str, str] | None = None
+    psf_value: str | None = None
+    dirty: list[str] | None = None
+
+    if form == FORM_BARE:
+        snapshot = _snapshot_for(state, commit["sha"])
+        if snapshot is not None:
+            manifest = snapshot["manifest"]
+            psf_value = snapshot.get("psf") if isinstance(snapshot.get("psf"), str) else psf(manifest)
+            verdict = compare_snapshot(local_manifest(list(manifest)), manifest)
+        else:
+            tree = fetch_tree(repo, commit["sha"], hint=hint)
+            if tree is None:
+                if write:
+                    _probe_failed(state, moment, "probe_failed", hint.get("retry_at"))
+                return None
+            manifest = tree["manifest"]
+            psf_value = tree["psf"]
+            previous = state.get("snapshot")
+            previous_manifest = previous.get("manifest") if isinstance(previous, dict) else None
+            verdict = classify(manifest, local_manifest(list(manifest), expect=manifest),
+                               previous_manifest)
+        status = "no_evidence" if verdict is None else verdict["status"]
+    else:
+        local_id = local_commit_id(form)
+        if local_id is None:
+            status = "no_evidence"
+        elif form == FORM_GIT:
+            dirty = git_dirty_paths()
+            if dirty is None:
+                status = "no_evidence"
+            elif local_id == commit["sha"]:
+                status = "drift" if dirty else "synced"
+            else:
+                status = "conflict" if dirty else "behind"
+            if dirty:
+                verdict = {"status": status,
+                           "detail": {"modified": dirty, "missing": [],
+                                      "stale": [], "extra": []}}
+        else:
+            status = "synced" if local_id == commit["sha"] else "behind"
+
     available = status not in ("synced", "no_evidence")
-    key = f"{remote['sha']}:{status}"
+    key = f"{commit['sha']}:{status}"
     prompt = available and prompt_allowed(moment, state, key)
-    # manifest/psf 只记录「上次一致时的快照」（方案 §4.6）：未同步时保留旧值，
-    # 否则下一轮会把「本地仍是旧版」误判成 drift。
-    synced = status == "synced"
-    new_state = {
+    new_state: dict[str, Any] = {
         **state,
         "last_check_at": moment,
         "last_result": status,
         "last_error": None,
-        "remote_sha": remote["sha"],
-        "remote_date": remote["date"],
+        "remote_sha": commit["sha"],
+        "remote_date": commit["date"],
         "retry_at": None,
-        "psf": remote["psf"] if synced else state.get("psf"),
-        "manifest": (storable_manifest(remote["manifest"]) if synced
-                     else state.get("manifest")),
     }
+    # 快照只在「bare 形态且本次一致」时写入，且 sha/发布集/psf 同时落盘（R5）
+    if form == FORM_BARE and status == "synced" and manifest is not None:
+        storable = storable_manifest(manifest)
+        if storable is not None:
+            new_state["snapshot"] = {
+                "sha": commit["sha"],
+                "date": commit["date"],
+                "manifest": storable,
+                "psf": psf_value if psf_value else psf(storable),
+            }
     if prompt:
         new_state["last_notified_key"] = key
         new_state["last_notified_at"] = moment
     if write and not write_state(new_state):
         return None
-    return update_block(form, remote, status, available, prompt,
+    return update_block(form, commit, status, available, prompt,
                         None if verdict is None else verdict["detail"])
 
 
@@ -697,46 +950,80 @@ def diagnose(*, now: float | None = None) -> dict[str, Any]:
     moment = _now() if now is None else now
     repo = repo_slug()
     state = read_state()
-    form = detect_form()
+    profile = detect_profile(repo=repo)
+    form = profile["form"]
     out: dict[str, Any] = {
         "state_path": str(STATE_FILE),
         "lock_path": str(LOCK_FILE),
         "repo": repo,
         "enabled": enabled(),
         "form": form,
+        "form_reason": profile["reason"],
+        "form_evidence": profile["evidence"],
         "state": state,
         "due": check_due(moment, state),
         "writable": state_writable(),
     }
     if not out["enabled"]:
         return out
-    usable = identity(form, repo)
-    out["identity"] = usable
-    if usable is not True:
+    if form == FORM_FOREIGN:
         return out
+
     hint: dict[str, Any] = {}
-    remote = fetch_remote_manifest(repo, hint=hint)
-    if remote is None and hint.get("retry_at"):
-        out["retry_at_hint"] = hint["retry_at"]
-    out["remote"] = None if remote is None else {
-        "sha": remote["sha"], "date": remote["date"],
-        "psf": remote["psf"], "paths": remote["paths"],
-        "excluded": remote.get("excluded", 0),
-    }
-    if remote is None:
+    commit = fetch_commit(repo, hint=hint)
+    if commit is None:
+        if hint.get("retry_at"):
+            out["retry_at_hint"] = hint["retry_at"]
         return out
-    local = local_manifest(list(remote["manifest"]), form=form,
-                           expect=remote["manifest"])
-    verdict = classify(remote["manifest"], local, state.get("manifest"))
-    status = "no_evidence" if verdict is None else verdict["status"]
+    out["remote"] = dict(commit)
+    out["local_sha"] = local_commit_id(form)
+
+    verdict: dict[str, Any] | None = None
+    if form == FORM_BARE:
+        snapshot = _snapshot_for(state, commit["sha"])
+        if snapshot is not None:
+            manifest = snapshot["manifest"]
+            verdict = compare_snapshot(local_manifest(list(manifest)), manifest)
+        else:
+            tree = fetch_tree(repo, commit["sha"], hint=hint)
+            if tree is None:
+                if hint.get("retry_at"):
+                    out["retry_at_hint"] = hint["retry_at"]
+                return out
+            out["remote"].update({k: tree[k] for k in ("psf", "paths")})
+            out["remote"]["excluded"] = tree.get("excluded", 0)
+            previous = state.get("snapshot")
+            previous_manifest = previous.get("manifest") if isinstance(previous, dict) else None
+            verdict = classify(tree["manifest"],
+                               local_manifest(list(tree["manifest"]), expect=tree["manifest"]),
+                               previous_manifest)
+        status = "no_evidence" if verdict is None else verdict["status"]
+    elif form == FORM_GIT:
+        dirty = git_dirty_paths()
+        local_id = out["local_sha"]
+        if local_id is None or dirty is None:
+            status = "no_evidence"
+        elif local_id == commit["sha"]:
+            status = "drift" if dirty else "synced"
+        else:
+            status = "conflict" if dirty else "behind"
+        if dirty:
+            out["dirty_paths"] = dirty[:10]
+            verdict = {"status": status,
+                       "detail": {"modified": dirty, "missing": [],
+                                  "stale": [], "extra": []}}
+    else:
+        local_id = out["local_sha"]
+        status = "no_evidence" if local_id is None else (
+            "synced" if local_id == commit["sha"] else "behind")
     available = status not in ("synced", "no_evidence")
-    key = f"{remote['sha']}:{status}"
+    key = f"{commit['sha']}:{status}"
+    prompt = available and prompt_allowed(moment, state, key)
     out.update(
         available=available,
         status=status,
-        prompt=available and prompt_allowed(moment, state, key),
-        block=update_block(form, remote, status, available,
-                           available and prompt_allowed(moment, state, key),
+        prompt=prompt,
+        block=update_block(form, commit, status, available, prompt,
                            None if verdict is None else verdict["detail"]),
     )
     if verdict is not None:
