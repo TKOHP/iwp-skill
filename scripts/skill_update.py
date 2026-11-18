@@ -10,7 +10,11 @@
     npx    备份保活文件 -> npx skills update -> 回填 -> 哈希校验
     bare   按远端 sha 下载定版 zip -> 回滚副本 -> 原子覆盖 -> 删除过期未改文件
 
+IWP_UPDATE_CHECK 是更新能力总开关：置 0/false/no/off 时检测与执行一起关闭，
+本执行器（含 --preview/--apply）直接返回退出码 6，不探测、不发任何请求。
+
 退出码：0 成功 / 1 失败 / 2 已是最新 / 3 需先确认 / 4 探测失败 / 5 拒绝执行
+        / 6 已被配置禁用（IWP_UPDATE_CHECK=0）
 
 方案：§3.4–§3.7（技能更新三形态探测与统一更新，见 docs 存档）
 """
@@ -44,6 +48,7 @@ EXIT_UPTODATE = 2
 EXIT_CONFIRM = 3
 EXIT_PROBE = 4
 EXIT_REFUSED = 5
+EXIT_DISABLED = 6  # IWP_UPDATE_CHECK=0：总开关关闭，未做任何探测
 
 # === 执行参数 ===
 GIT_PULL_TIMEOUT_S = 180.0
@@ -543,6 +548,15 @@ def _rollback(d: Path, work: Path, replaced: list[str], created: list[str]) -> l
 def run(d: Path | None = None, repo: str | None = None, *, apply: bool = False,
         force: bool = False) -> dict[str, Any]:
     base = skill_dir() if d is None else d
+    # 总开关：关闭时连 --preview 也不联网、不判形态，直接拒绝（方案 §3.9）
+    if not uc.enabled():
+        return {
+            "ok": False,
+            "exit": EXIT_DISABLED,
+            "error": "update_disabled",
+            "message": "IWP_UPDATE_CHECK=0：更新检测与更新执行均已关闭，"
+                       "本次未发起任何请求；如需更新，先把 .env 中该开关置 1",
+        }
     plan = make_plan(base, repo)
     out: dict[str, Any] = {"plan": public_plan(plan)}
     if plan.get("error"):

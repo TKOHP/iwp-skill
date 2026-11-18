@@ -86,7 +86,11 @@ NPX_TIMEOUT_S = 20.0
 
 
 def enabled() -> bool:
-    """IWP_UPDATE_CHECK：默认开；0/false/no/off 关闭整项能力。"""
+    """IWP_UPDATE_CHECK：默认开；0/false/no/off 关闭整项能力（检测 + 执行）。
+
+    本函数是更新能力的唯一总开关：preflight 附带检测、独立诊断、以及
+    scripts/skill_update.py 的执行入口（含预览）都以它为准。
+    """
     raw = skill_config._cfg("IWP_UPDATE_CHECK", "1").strip().lower()
     return raw not in _OFF_VALUES
 

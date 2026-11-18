@@ -37,8 +37,9 @@
 - 提示不改变任何行为：**不得自动更新**；用户要求更新时按本文件 Step 0–3 执行
 - 探测失败（断网、限流、状态不可写）由脚本自身退避：网络错误 15 分钟后重试，配额耗尽按
   `x-ratelimit-reset` 重试，回复中同样保持静默
-- 关闭或改仓库：`.env` 设 `IWP_UPDATE_CHECK=0`；`IWP_UPDATE_REPO=owner/repo` 覆盖默认
-  `TKOHP/iwp-skill`
+- 关闭或改仓库：`.env` 设 `IWP_UPDATE_CHECK=0`（**总开关**：检测与执行一并关闭——不探测、不提示，
+  `scripts/skill_update.py` 的 `--preview` / `--apply` 都直接返回 `error: update_disabled` 与退出码 6，
+  不发任何请求）；`IWP_UPDATE_REPO=owner/repo` 覆盖默认 `TKOHP/iwp-skill`
 - 单独诊断：`python scripts/update_check.py`（只读，不写状态、不改变提示闸门，输出含
   `form` / `form_reason` / `form_evidence` 与 `diff` 每类前 10 条路径）
 
@@ -74,6 +75,8 @@ python scripts/skill_update.py --preview
 按 `status` 与退出码分流：
 
 - `available: false`（退出码 2）：已是最新或无可比证据 → 告知用户，结束，不执行任何改动
+- `error: update_disabled`（退出码 6）：`.env` 的 `IWP_UPDATE_CHECK=0`，更新能力被整体关闭 → 说明这是
+  显式配置而非故障；需要更新时先把该开关改为 1，**不要**绕过脚本手工执行更新
 - `needs_confirm: true`（`drift` / `conflict` / `unknown`，或形态为 `npx`）→ 必须先把
   `status`、`detail`、`update_action` 与「更新会覆盖什么」写进本条回复正文，取得用户确认后
   再进入 Step 2 并加 `--force`。`npx` 形态无法判定本地文件是否被改动，一律按需确认处理
@@ -125,6 +128,7 @@ python scripts/skill_update.py --apply --force  # 用户已在 Step 1 确认覆�
 | 3 | 需要用户先确认覆盖风险（Step 2 需加 `--force`） |
 | 4 | 探测失败（断网、限流、状态不可写） |
 | 5 | 拒绝执行（分叉仓库、链接安装、保活清单不可读） |
+| 6 | 已被配置禁用（`.env` 的 `IWP_UPDATE_CHECK=0`，未发起任何请求） |
 
 ## 非 Windows
 
