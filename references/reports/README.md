@@ -34,10 +34,10 @@
    参数以 inputSchema 为准）:
    单条 → python cli.py call create_weekly_report --args-file _args.json
    多条 → python cli.py call batch_create_weekly_reports --args-file _args.json
-4. 回执: 周报 ID + 提交状态
+4. 回执: 周报 ID + 周报类型（课题/非课题）
 ```
 
-**缺省不提交；用户明确说「提交」才置提交**（提交动作的预览规则见 `../_shared/write-preview.md` 工具要点表）。
+**平台没有「暂存草稿 / 提交」状态机**：周报一旦创建即入库，统计口径把"该周存在记录"算作已交。`is_submitted` 是**周报类型位**（1=课题周报 / 0=非课题周报），必须随 `subject_id` 显式传值——挂课题传 1、不挂课题传 0，不要按"草稿/提交"理解（预览规则见 `../_shared/write-preview.md` 工具要点表）。
 
 ## 4. 子工作流 W2：根据课题任务生成周报（智能生成）
 
@@ -57,7 +57,7 @@
    - 双向覆盖判据:每条周报的来源可对应材料中的真实任务;
      材料中每条任务要么被某条周报引用,要么在预览中说明未采用原因——不静默丢弃
 4. 确认后创建: 单条 → create_weekly_report;多条 → batch_create_weekly_reports
-   （每条带各自 subject_id;缺省不提交,用户明确说「提交」才置提交）
+   （每条带各自 subject_id,并按 subject_id 显式传 is_submitted:有课题=1,非课题=0;平台无"提交"动作）
 ```
 
 **生成契约（四条必须全部满足）**：
@@ -114,7 +114,7 @@
 
 任何写操作执行前，在回复正文呈现全字段完整预览（模板 U：变更类「现状→执行后」对照；模板 C：创建类全字段含默认值；W2 生成路径的周报预览额外附溯源行），同一条消息发起确认，确认后执行、执行后回读核验。规则、模板与各工具要点以 `../_shared/write-preview.md` 为唯一事实来源，此处不重复。
 
-batch_create：条目 ≥3 时合并成一张表（每行一条，列＝全字段）→ 同一条消息确认 → 确认后调 → **单条失败不阻塞其余**，事后逐条报告。
+batch_create：条目 ≥3 时合并成一张表（每行一条，列＝全字段）→ 同一条消息确认 → 确认后调 → **整批原子**：后端先校验全部条目，任一条不合法即整批 400、一条都不写；回执只有一个 `created_count`，不存在"单条成功/失败"清单。
 
 ## 6. 查询子工作流 W3 与工作周发现
 
@@ -124,9 +124,9 @@ python cli.py call list_work_weeks --args '{"year": 2026}' --out _weeks.json
 
 # 我的周报 / 按维度查
 python cli.py call list_weekly_reports --args-file _args.json --out _reports.json
-# _args.json 示例: {"user_id": 39} 或 {"work_week_id": N} / {"subject_id": N} / {"is_submitted": 1}
+# _args.json 示例: {"user_id": 39} 或 {"work_week_id": N} / {"subject_id": N} / {"is_submitted": 0}（按周报类型过滤,不是提交状态）
 
-# 周报详情 / 更新 / 删除(高危:物理删除不可恢复,预览要点见 ../_shared/write-preview.md 工具要点表)
+# 周报详情 / 更新 / 删除(高危:软删除——平台列表不可见、后台仍保留;预览要点见 ../_shared/write-preview.md 工具要点表)
 python cli.py call get_weekly_report_detail --args '{"report_id": N}'
 python cli.py call update_weekly_report --args-file _args.json
 # _args.json: {"id": N, ...要改的字段}
@@ -141,7 +141,7 @@ python cli.py call delete_weekly_report --args '{"report_id": N}'
 
 ## 8. 输出渲染
 
-按 `../_shared/output-format.md`。周报列表用表格（ID/周/事项/提交状态）；W2 的溯源预览随每条条目呈现（条目 ≥3 时合并成一张表，每条附全字段行、来源任务行与未采用说明），首行标出采用的形态（A/B/C/D）与换形态理由，三个文本字段**逐行原样呈现分点**，不压成一段、不重排编号；创建回执给 ID + 提交状态。
+按 `../_shared/output-format.md`。周报列表用表格（ID/周/事项/周报类型）；W2 的溯源预览随每条条目呈现（条目 ≥3 时合并成一张表，每条附全字段行、来源任务行与未采用说明），首行标出采用的形态（A/B/C/D）与换形态理由，三个文本字段**逐行原样呈现分点**，不压成一段、不重排编号；创建回执给 ID + 周报类型。
 
 ## 9. 错误处理
 
@@ -154,4 +154,4 @@ python cli.py call delete_weekly_report --args '{"report_id": N}'
 | `identity_unavailable` | 提示身份信息获取失败；让用户直接提供 user_id/org_id 或稍后重试 |
 | `permission_denied`（weekly_report_* / work_week_view） | 提示联系管理员检查角色权限 |
 | `validation_error` | 重新读 inputSchema 核对参数后引导用户修正 |
-| batch 部分失败 | 逐条报告成功/失败清单，失败条目给出原因，不自动重试 |
+| batch 校验失败（400） | 整批未写入：指出哪条不合法并给出原因，修正后整批重试；不存在"部分成功" |

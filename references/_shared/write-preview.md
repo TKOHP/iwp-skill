@@ -9,7 +9,7 @@
 | 路由 | 覆盖工具 |
 |----------|---------|
 | tasks | create_task、update_task、delete_task、assign_task、add_task_log |
-| reports | create_weekly_report、batch_create_weekly_reports、update_weekly_report（含提交 0→1）、delete_weekly_report |
+| reports | create_weekly_report、batch_create_weekly_reports、update_weekly_report（含 is_submitted 类型位变更）、delete_weekly_report |
 | free-mode | 透传的任何写性质工具（create / update / assign / delete / 批量，按 description 判断） |
 
 **无例外**：单字段低危修改、用户说「直接做」，同样先完整预览——预览是用户看到真实写入效果的唯一时机。执行以用户对预览的明确确认为准。
@@ -84,7 +84,7 @@ python cli.py call get_task_detail --args '{"task_id": N}' --out _verify.json
 
 - 执行后回读 detail，与预览逐字段对照
 - 回执 = 新值 + 核验结论：「核验通过，与预览一致」或差异报告（预期 vs 实际）
-- **批量写**：条目 ≥3 时合并成一张表（每行一条，列＝全字段；父子或归属关系用父行标题／`task_id` 标注），随正文一次确认 → 确认后逐条执行 → 每条独立回执与核验，单条失败不阻塞其余。条目 1–2 条按 §3/§4 单独呈现
+- **批量写**：条目 ≥3 时合并成一张表（每行一条，列＝全字段；父子或归属关系用父行标题／`task_id` 标注），随正文一次确认 → 确认后逐条执行 → 每条独立回执与核验，单条失败不阻塞其余（例外：周报 `batch_create_weekly_reports` 是整批原子，见 `../reports/README.md` §5）。条目 1–2 条按 §3/§4 单独呈现
 
 ## 7. 工具要点表
 
@@ -95,6 +95,6 @@ python cli.py call get_task_detail --args '{"task_id": N}' --out _verify.json
 | delete_task | U | 「执行后」整列标注「软删除，平台任务列表不可见」；平台侧恢复走 Web 端 |
 | assign_task | U | 覆盖式：「执行后」呈现完整新名单，被移除者显式标注（移除） |
 | add_task_log | C | 呈现新增日志全文；注明任务其他字段零改动 |
-| create_weekly_report / batch | C | 缺省不提交，用户明确说「提交」才置提交；batch 条目 ≥3 时合并成一张表（§6）；W2 生成路径附溯源行（见 §4） |
-| update_weekly_report / 提交 | U | 提交（is_submitted 0→1）只在用户明确说「提交」时出现在预览中 |
-| delete_weekly_report | U | 高危且不可恢复（物理删除）：「执行后」整列标注「删除后无法恢复」 |
+| create_weekly_report / batch | C | 平台无草稿/提交状态：创建即入库。`is_submitted` 是周报类型位（挂课题=1，非课题=0），按 `subject_id` 显式传，预览表按「周报类型」一行呈现；batch 条目 ≥3 时合并成一张表（§6）；W2 生成路径附溯源行（见 §4） |
+| update_weekly_report | U | `is_submitted` 改动呈现为「周报类型」变化（课题↔非课题），不是提交动作；归属字段 `user_id`/`org_id` 传了也不生效，不要写进预览 |
+| delete_weekly_report | U | 软删除：平台列表不可见、后台保留记录，可人工恢复；「执行后」整列标注「删除后平台列表不可见」 |
